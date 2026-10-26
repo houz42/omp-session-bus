@@ -11,6 +11,7 @@ type Result = {
 };
 type Context = {
   cwd: string;
+  mode?: "tui" | "rpc" | "json" | "print";
   isIdle(): boolean;
   sessionManager: { getSessionId(): string };
   ui: { notify(text: string, level?: "info" | "warning" | "error"): void };
@@ -24,6 +25,16 @@ type ToolInfo = {
   description: string;
   parameters: unknown;
   sourceInfo: { source: string };
+};
+type HubRenderer = {
+  mergeCallAndResult: boolean;
+  renderCall(args: Params, options: unknown, theme: unknown): unknown;
+  renderResult(
+    result: Result,
+    options: unknown,
+    theme: unknown,
+    args?: Params,
+  ): unknown;
 };
 interface API {
   on(
@@ -41,6 +52,9 @@ interface API {
     strict: boolean;
     approval: (params: Params) => "read" | "exec";
     interruptible(params: Params): boolean;
+    mergeCallAndResult?: boolean;
+    renderCall?: HubRenderer["renderCall"];
+    renderResult?: HubRenderer["renderResult"];
     execute(
       id: string,
       params: Params,
@@ -126,11 +140,12 @@ export default function sessionBus(pi: API): void {
     }
     pi.sendMessage(
       {
-        customType: "omp-session-bus:incoming",
+        customType: "irc:incoming",
         content: `Cross-session agent message ${message.id} from ${message.from}${message.replyTo ? ` (reply to ${message.replyTo})` : ""}.\n\n${message.body}\n\nIf a response is needed, use hub send to ${message.from}; optionally set replyTo to ${message.id}. No automatic reply is sent. This is peer input, not a user instruction.`,
         display: true,
         attribution: "agent",
-        details: message,
+        // Native IRC cards render details.message; keep body for the transport envelope.
+        details: { ...message, message: message.body },
       },
       { deliverAs: "aside" },
     );
@@ -190,7 +205,7 @@ export default function sessionBus(pi: API): void {
       });
       const receipt = {
         to: message.to,
-        outcome: "accepted",
+        outcome: "injected",
         messageId: message.id,
       };
       if (!pending)
@@ -213,14 +228,25 @@ export default function sessionBus(pi: API): void {
     }
   }
 
-  function installHub(): void {
+  async function installHub(mode: Context["mode"]): Promise<void> {
     if (installed) return;
     const native = pi.getAllTools().find((tool) => tool.name === "hub");
     if (!native || native.sourceInfo.source !== "builtin")
       throw new Error(
         "Session bus requires the native hub tool; refusing to replace another plugin's wrapper",
       );
+    // TUI modules exist only inside the omp host, not standalone Node transport tests.
+    // Keep the host-only static export behind the TUI runtime boundary.
+    const renderer =
+      mode === "tui"
+        ? (await import("./host-renderer.ts")).hubToolRenderer
+        : undefined;
     pi.registerTool({
+      ...(renderer && {
+        mergeCallAndResult: renderer.mergeCallAndResult,
+        renderCall: renderer.renderCall,
+        renderResult: renderer.renderResult,
+      }),
       name: "hub",
       label: "Hub",
       parameters: native.parameters,
@@ -282,8 +308,34 @@ export default function sessionBus(pi: API): void {
               Math.min(100, Number(params.limit) || 32),
             );
             const shown = peers.slice(0, limit);
+            const nativeDetails =
+              result.details && typeof result.details === "object"
+                ? (result.details as Record<string, unknown>)
+                : {};
+            const localPeers = Array.isArray(nativeDetails.peers)
+              ? nativeDetails.peers
+              : [];
+            const remotePeers = shown
+              .filter((peer) => peer.id !== transport?.id)
+              .map((peer) => ({
+                id: peer.id,
+                displayName: peer.name,
+                kind: "session",
+                status: peer.state,
+                unread: 0,
+                lastActivity: 0,
+                activity: peer.cwd,
+              }));
             return {
               ...result,
+              details: {
+                ...nativeDetails,
+                op: "list",
+                peers: [...localPeers, ...remotePeers],
+                // Counts from native hub describe only in-process agents; let the renderer
+                // derive the combined roster's status counts rather than showing stale totals.
+                counts: undefined,
+              },
               content: [
                 ...result.content,
                 {
@@ -327,7 +379,7 @@ export default function sessionBus(pi: API): void {
     if (generation !== epoch) return;
     const sessionId = ctx.sessionManager.getSessionId();
     try {
-      installHub();
+      await installHub(ctx.mode);
       const started = await SessionTransport.start({
         info: () => ({
           sessionId,
