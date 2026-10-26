@@ -10,7 +10,7 @@ type API = Parameters<typeof extension>[0];
 type Context = Parameters<Parameters<API["on"]>[1]>[1];
 type Tool = Parameters<API["registerTool"]>[0];
 
-async function fixture() {
+async function fixture(nativeHub = true) {
   const directory = await mkdtemp(join(tmpdir(), "omp-bridge-"));
   const previous = process.env.OMP_SESSION_BUS_DIR;
   process.env.OMP_SESSION_BUS_DIR = directory;
@@ -32,14 +32,17 @@ async function fixture() {
     on: (event, handler) => {
       handlers.set(event, handler);
     },
-    getAllTools: () => [
-      {
-        name: "hub",
-        description: "native",
-        parameters: {},
-        sourceInfo: { source: "builtin" },
-      },
-    ],
+    getAllTools: () =>
+      nativeHub
+        ? [
+            {
+              name: "hub",
+              description: "native",
+              parameters: {},
+              sourceInfo: { source: "builtin" },
+            },
+          ]
+        : [],
     getSessionName: () => "bridge",
     registerTool: (registered) => {
       tool = registered;
@@ -169,6 +172,54 @@ test("native list stays local while sessions explicitly discovers cross-session 
       f.context,
     );
     assert.ok(remote.content.some((part) => part.text.includes(peer.id)));
+  } finally {
+    await peer.close();
+    await f.close();
+  }
+});
+
+test("host without native hub supports cross-session delivery without emulating native operations", async () => {
+  const f = await fixture(false);
+  const messages: Envelope[] = [];
+  const peer = await SessionTransport.start({
+    directory: f.directory,
+    info: () => ({
+      sessionId: "peer",
+      name: "Peer",
+      cwd: "/other",
+      pid: process.pid,
+      state: "idle",
+    }),
+    receive: (message) => {
+      messages.push(message);
+    },
+  });
+  try {
+    const unsupported = await f.tool.execute(
+      "native",
+      { op: "list" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(unsupported.isError, true);
+    const sent = await f.tool.execute(
+      "send",
+      { op: "send", to: peer.id, message: "Modern host message" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(sent.isError, undefined);
+    assert.equal(messages[0]?.body, "Modern host message");
+    const discovery = await f.tool.execute(
+      "discover",
+      { op: "sessions" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.ok(discovery.content.some((part) => part.text.includes(peer.id)));
   } finally {
     await peer.close();
     await f.close();

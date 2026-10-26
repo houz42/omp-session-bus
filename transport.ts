@@ -748,10 +748,14 @@ export class SessionTransport {
         "the session bus endpoint closed before the message was acknowledged; delivery is ambiguous",
       );
     }
+    if (error instanceof Error && error.name === "AbortError")
+      return abortError(
+        "send cancelled before acknowledgment; delivery may have occurred, do not resend automatically",
+      );
     if (error instanceof RequestError) {
       if (error.kind === "offline")
         return new Error(
-          `target session ${to} is not reachable; it may be offline (use list to see live sessions)`,
+          `target session ${to} is not reachable; it may be offline (use hub sessions to see live sessions)`,
         );
       if (error.kind === "timeout") {
         return new Error(
@@ -763,8 +767,6 @@ export class SessionTransport {
           `target session ${to} closed the connection before acknowledging; delivery is ambiguous, do not resend automatically`,
         );
       }
-      if (error.kind === "aborted")
-        return abortError("send cancelled before the peer acknowledged");
       return new Error(`sending to ${to} failed: ${error.message}`);
     }
     return error instanceof Error ? error : new Error(String(error));
