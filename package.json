@@ -1,0 +1,23 @@
+{
+  "name": "omp-session-bus",
+  "version": "0.1.0",
+  "description": "Same-user cross-process messaging through omp's hub tool",
+  "type": "module",
+  "private": true,
+  "omp": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test *.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}
