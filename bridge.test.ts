@@ -11,7 +11,9 @@ type Context = Parameters<Parameters<API["on"]>[1]>[1];
 type Tool = Parameters<API["registerTool"]>[0];
 
 async function fixture(nativeHub = true) {
-  const directory = await mkdtemp(join(tmpdir(), "omp-bridge-"));
+  const directory = await mkdtemp(
+    join(process.platform === "darwin" ? "/tmp" : tmpdir(), "omp-bridge-"),
+  );
   const previous = process.env.OMP_SESSION_BUS_DIR;
   process.env.OMP_SESSION_BUS_DIR = directory;
   const handlers = new Map<string, Parameters<API["on"]>[1]>();
