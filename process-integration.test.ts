@@ -94,7 +94,9 @@ test(
   "independent processes discover, exchange messages, persist board posts, and retire endpoints",
   { timeout: 30000 },
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bus-process-"));
+    const directory = await mkdtemp(
+      join(process.platform === "darwin" ? "/tmp" : tmpdir(), "bus-process-"),
+    );
     const board = join(directory, "board");
     const a = worker(directory, "A");
     const b = worker(directory, "B");

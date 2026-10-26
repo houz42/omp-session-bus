@@ -97,6 +97,7 @@ Notes:
 - The socket directory is created with mode `0700` and sockets with `0600`; the board directory likewise `0700` and post files `0600`. The plugin **refuses to operate** on a directory that is a symlink, owned by another UID, or readable by group/other — fix ownership/permissions or point the variable at a different path.
 - Sessions started with different values of these variables cannot see each other. Set them consistently (e.g. in your shell profile) if you need one shared registry across terminal environments.
 - Restart omp after changing either variable.
+- Keep custom socket directory paths short: the full path including the UUID filename must fit 103 UTF-8 bytes on macOS or 107 on Linux. macOS defaults to `/tmp` rather than its long per-user temporary directory. Oversized paths fail explicitly; choose a shorter private `OMP_SESSION_BUS_DIR`.
 
 ## Uninstall
 

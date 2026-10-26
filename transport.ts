@@ -147,7 +147,7 @@ function defaultDirectory(): string {
     return join(runtime, "omp-session-bus");
   const uid = currentUid();
   return join(
-    tmpdir(),
+    process.platform === "darwin" ? "/tmp" : tmpdir(),
     uid === undefined ? "omp-session-bus" : `omp-session-bus-${uid}`,
   );
 }
@@ -546,6 +546,12 @@ export class SessionTransport {
     await ensureSafeDirectory(directory);
     const uuid = randomUUID();
     const socketPath = join(directory, `${uuid}.sock`);
+    // Darwin sun_path is 104 bytes; Linux is 108, including the terminating NUL.
+    const maxPathBytes = process.platform === "darwin" ? 103 : 107;
+    if (Buffer.byteLength(socketPath) > maxPathBytes)
+      throw new Error(
+        `Unix socket path exceeds ${maxPathBytes} bytes; set OMP_SESSION_BUS_DIR to a shorter private directory`,
+      );
     const server = createServer({ allowHalfOpen: true });
     const transport = new SessionTransport(
       `${SESSION_PREFIX}${uuid}`,
