@@ -138,3 +138,39 @@ test("cancelling an accepted send releases waiter; late reply becomes an aside",
     await f.close();
   }
 });
+
+test("native list stays local while sessions explicitly discovers cross-session peers", async () => {
+  const f = await fixture();
+  const peer = await SessionTransport.start({
+    directory: f.directory,
+    info: () => ({
+      sessionId: "separate-session",
+      name: "Separate",
+      cwd: "/other",
+      pid: process.pid,
+      state: "idle",
+    }),
+    receive: () => {},
+  });
+  try {
+    const local = await f.tool.execute(
+      "local",
+      { op: "list" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(local.content.map((part) => part.text).join("\n"), "native");
+    const remote = await f.tool.execute(
+      "remote",
+      { op: "sessions" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.ok(remote.content.some((part) => part.text.includes(peer.id)));
+  } finally {
+    await peer.close();
+    await f.close();
+  }
+});
