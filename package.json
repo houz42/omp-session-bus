@@ -1,6 +1,6 @@
 {
   "name": "omp-session-bus",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Cross-session messaging and public boards through the standalone session_bus tool",
   "type": "module",
   "private": true,
@@ -36,6 +36,7 @@
     "transport.ts",
     "board.ts",
     "board-store.ts",
+    "board-watch.ts",
     "host-renderer.ts",
     "host-tui.d.ts",
     "tsconfig.json"

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { SessionTransport, type Envelope, type PeerInfo } from "./transport.ts";
 import { BOARD_HELP, BOARD_TOPIC_HELP, executeBoard } from "./board.ts";
+import { BoardWatcher } from "./board-watch.ts";
 
 // Public extension API subset: no runtime SDK install or private IRC imports.
 type Params = Record<string, unknown>;
@@ -90,6 +91,8 @@ function approval(params: Params): "read" | "write" {
     : "read";
 }
 
+const WATCH_HELP = `Non-blocking public-board subscriptions: op:watch from board:<topic> or board:all returns immediately with a watch id. Optional grep and author use the same AND filters as board list. Only future posts after registration are delivered; use list for history. Own-session posts are ignored and overlapping watches deduplicate. Brief bursts are batched into native IRC asides; idle subscribers wake and may incur model calls. No automatic replies: do not echo/repost notifications in a loop. op:watches lists active subscriptions; op:unwatch id:<watch-id> cancels. Watches last until removed or session exit/switch/branch; optional ttl seconds1..31536000 expires a watch (separate from post TTL). No restored subscriptions after restart, no blocking board wait. Filesystem notifications plus periodic plugin-local reconciliation do not require model polling. Errors close affected session watches and surface a warning; list historical posts to recover.`;
+
 type Waiter = {
   from: string;
   finish(message: Envelope | null): void;
@@ -101,6 +104,8 @@ export default function sessionBus(pi: API): void {
   let rendererLoading: Promise<void> | undefined;
   let generation = 0;
   let unavailable = "Session bus has not started";
+  let boardWatcher: BoardWatcher | undefined;
+  let boardStarting: Promise<BoardWatcher> | undefined;
   const waiters = new Set<Waiter>();
 
   function requireTransport(): SessionTransport {
@@ -228,8 +233,21 @@ export default function sessionBus(pi: API): void {
         status: { type: "string", enum: ["running", "idle"] },
         grep: { type: "string" },
         timeout: { type: "number", exclusiveMinimum: 0 },
+        id: {
+          type: "string",
+          description: "unwatch: subscription id returned by watch/watches",
+        },
         op: {
-          enum: ["send", "wait", "list", "topics", "sessions"],
+          enum: [
+            "send",
+            "wait",
+            "list",
+            "topics",
+            "sessions",
+            "watch",
+            "watches",
+            "unwatch",
+          ],
           type: "string",
           description: "session bus operation",
         },
@@ -251,17 +269,121 @@ export default function sessionBus(pi: API): void {
           minimum: 1,
           maximum: 31536000,
           description:
-            "board send: expiry in seconds; default 604800 (7 days), max 365 days",
+            "board send: post expiry, default7days; watch: optional subscription expiry, default session lifetime (seconds1..31536000)",
         },
       },
     },
-    description: `${HELP}\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}`,
+    description: `${HELP}\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}\n${WATCH_HELP}`,
     loadMode: "essential",
     strict: true,
     approval,
     interruptible: (params) => params.op === "wait",
     async execute(_id, params, signal, onUpdate, ctx) {
       try {
+        if (["watch", "watches", "unwatch"].includes(String(params.op))) {
+          if (signal?.aborted)
+            throw new Error("Subscription operation cancelled");
+          if (params.op === "watches") {
+            const watches = boardWatcher?.list() ?? [];
+            return textResult(JSON.stringify({ watches }), { watches });
+          }
+          if (params.op === "unwatch") {
+            if (typeof params.id !== "string" || !params.id)
+              throw new Error("unwatch requires a watch id");
+            if (!boardWatcher?.remove(params.id))
+              throw new Error("Unknown or expired watch id; use watches");
+            return textResult(`Removed board watch ${params.id}.`, {
+              removed: params.id,
+            });
+          }
+          if (
+            params.to ||
+            params.before ||
+            params.since ||
+            params.limit ||
+            params.replyTo ||
+            params.await !== undefined
+          )
+            throw new Error(
+              "watch accepts from, grep, author, and optional ttl only; it does not wait or replay history",
+            );
+          if (
+            typeof params.from !== "string" ||
+            !params.from.startsWith("board:") ||
+            !params.from.slice(6).trim()
+          )
+            throw new Error("watch requires from:board:<topic> or board:all");
+          const epoch = generation;
+          const sessionId = ctx.sessionManager.getSessionId();
+          boardStarting ??= BoardWatcher.create({
+            sessionId,
+            deliver: (posts) => {
+              if (
+                generation !== epoch ||
+                ctx.sessionManager.getSessionId() !== sessionId
+              )
+                return;
+              const body = posts
+                .map(
+                  (post) =>
+                    `[${post.id}] board:${post.topic ?? "general"} — ${post.author.name}\n${post.body}`,
+                )
+                .join("\n\n");
+              pi.sendMessage(
+                {
+                  customType: "irc:incoming",
+                  content: body,
+                  display: true,
+                  attribution: "agent",
+                  details: {
+                    from: "Board subscriptions",
+                    message: body,
+                    posts,
+                  },
+                },
+                { deliverAs: "aside" },
+              );
+            },
+            onError: (error) => {
+              if (generation !== epoch) return;
+              boardWatcher = undefined;
+              boardStarting = undefined;
+              ctx.ui.notify(`Board watches stopped: ${error.message}`, "error");
+            },
+          })
+            .then((watcher) => {
+              if (generation !== epoch) {
+                watcher.close();
+                throw new Error(
+                  "Session changed while starting board subscriptions",
+                );
+              }
+              boardWatcher = watcher;
+              return watcher;
+            })
+            .catch((error) => {
+              if (generation === epoch) boardStarting = undefined;
+              throw error;
+            });
+          const watcher = await boardStarting;
+          if (signal?.aborted)
+            throw new Error("Subscription operation cancelled");
+          const subscription = await watcher.add({
+            from: params.from,
+            grep: typeof params.grep === "string" ? params.grep : undefined,
+            author:
+              typeof params.author === "string" ? params.author : undefined,
+            ttl: typeof params.ttl === "number" ? params.ttl : undefined,
+          });
+          if (signal?.aborted) {
+            watcher.remove(subscription.id);
+            throw new Error("Subscription operation cancelled");
+          }
+          return textResult(
+            `Watching ${subscription.from}; id ${subscription.id}. Registration complete; keep working. ${subscription.expiresAt ? `Expires ${subscription.expiresAt}.` : "Active until removed or this session ends."}`,
+            { watch: subscription },
+          );
+        }
         if (params.op === "sessions") {
           const peers = (await requireTransport().list(signal)).filter(
             (peer) => !params.status || peer.state === params.status,
@@ -332,7 +454,7 @@ export default function sessionBus(pi: API): void {
           );
         }
         throw new Error(
-          "Use sessions/topics, send to session:/board:, wait from session:, or list from board:. Native tools are separate.",
+          "Use sessions/topics/watch/watches/unwatch, send to session:/board:, wait from session:, or list from board:. Native tools are separate.",
         );
       } catch (error) {
         return { ...textResult(errorText(error)), isError: true };
@@ -342,6 +464,9 @@ export default function sessionBus(pi: API): void {
 
   async function stop(): Promise<void> {
     generation++;
+    boardWatcher?.close();
+    boardWatcher = undefined;
+    boardStarting = undefined;
     for (const waiter of waiters) waiter.finish(null);
     const old = transport;
     transport = undefined;

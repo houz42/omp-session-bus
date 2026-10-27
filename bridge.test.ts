@@ -220,3 +220,74 @@ test("standalone tool delivers without exposing native operations", async () => 
     await f.close();
   }
 });
+
+test("board subscriptions end on session switch and old watch ids cannot cancel new subscriptions", async () => {
+  const f = await fixture();
+  const previous = process.env.OMP_SESSION_BOARD_DIR;
+  process.env.OMP_SESSION_BOARD_DIR = join(f.directory, "board");
+  try {
+    const first = await f.tool.execute(
+      "watch",
+      { op: "watch", from: "board:updates" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(first.isError, undefined);
+    assert.ok(
+      first.details &&
+        typeof first.details === "object" &&
+        "watch" in first.details,
+    );
+    const firstWatch = first.details.watch;
+    assert.ok(
+      firstWatch &&
+        typeof firstWatch === "object" &&
+        "id" in firstWatch &&
+        typeof firstWatch.id === "string",
+    );
+    const oldId = firstWatch.id;
+    await f.handlers.get("session_switch")?.({}, f.context);
+    const cleared = await f.tool.execute(
+      "list",
+      { op: "watches" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.deepEqual(cleared.details, { watches: [] });
+    const second = await f.tool.execute(
+      "new",
+      { op: "watch", from: "board:updates" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(second.isError, undefined);
+    const stale = await f.tool.execute(
+      "remove",
+      { op: "unwatch", id: oldId },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(stale.isError, true);
+    const active = await f.tool.execute(
+      "active",
+      { op: "watches" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.ok(
+      second.details &&
+        typeof second.details === "object" &&
+        "watch" in second.details,
+    );
+    assert.deepEqual(active.details, { watches: [second.details.watch] });
+  } finally {
+    if (previous === undefined) delete process.env.OMP_SESSION_BOARD_DIR;
+    else process.env.OMP_SESSION_BOARD_DIR = previous;
+    await f.close();
+  }
+});
