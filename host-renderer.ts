@@ -2,7 +2,7 @@ import { toolRenderers } from "@oh-my-pi/pi-tui/tools";
 
 // Newer hosts moved IRC rendering under wait; keep using their native message card.
 const native = toolRenderers.hub ?? toolRenderers.wait;
-export const hubToolRenderer = toolRenderers.hub ?? {
+export const sessionBusRenderer = toolRenderers.hub ?? {
   mergeCallAndResult: true,
   renderCall(args: Record<string, unknown>, options: unknown, theme: unknown) {
     return native.renderResult(

@@ -10,7 +10,7 @@ type API = Parameters<typeof extension>[0];
 type Context = Parameters<Parameters<API["on"]>[1]>[1];
 type Tool = Parameters<API["registerTool"]>[0];
 
-async function fixture(nativeHub = true) {
+async function fixture() {
   const directory = await mkdtemp(
     join(process.platform === "darwin" ? "/tmp" : tmpdir(), "omp-bridge-"),
   );
@@ -28,23 +28,11 @@ async function fixture(nativeHub = true) {
         throw new Error(text);
       },
     },
-    invokeTool: async () => ({ content: [{ type: "text", text: "native" }] }),
   };
   extension({
     on: (event, handler) => {
       handlers.set(event, handler);
     },
-    getAllTools: () =>
-      nativeHub
-        ? [
-            {
-              name: "hub",
-              description: "native",
-              parameters: {},
-              sourceInfo: { source: "builtin" },
-            },
-          ]
-        : [],
     getSessionName: () => "bridge",
     registerTool: (registered) => {
       tool = registered;
@@ -54,6 +42,11 @@ async function fixture(nativeHub = true) {
       injected.push(message);
     },
   });
+  assert.ok(
+    tool,
+    "Tool must be registered before session_start for launch filtering",
+  );
+  assert.equal(tool.name, "session_bus");
   await handlers.get("session_start")?.({}, context);
   assert.ok(tool);
   return {
@@ -144,7 +137,7 @@ test("cancelling an accepted send releases waiter; late reply becomes an aside",
   }
 });
 
-test("native list stays local while sessions explicitly discovers cross-session peers", async () => {
+test("session discovery is explicit and bare list never substitutes peer discovery", async () => {
   const f = await fixture();
   const peer = await SessionTransport.start({
     directory: f.directory,
@@ -165,7 +158,7 @@ test("native list stays local while sessions explicitly discovers cross-session 
       undefined,
       f.context,
     );
-    assert.equal(local.content.map((part) => part.text).join("\n"), "native");
+    assert.equal(local.isError, true);
     const remote = await f.tool.execute(
       "remote",
       { op: "sessions" },
@@ -180,8 +173,8 @@ test("native list stays local while sessions explicitly discovers cross-session 
   }
 });
 
-test("host without native hub supports cross-session delivery without emulating native operations", async () => {
-  const f = await fixture(false);
+test("standalone tool delivers without exposing native operations", async () => {
+  const f = await fixture();
   const messages: Envelope[] = [];
   const peer = await SessionTransport.start({
     directory: f.directory,
