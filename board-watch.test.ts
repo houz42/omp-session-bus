@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { strict as assert } from "node:assert";
 import test from "node:test";
+import { MessageChannel } from "node:worker_threads";
 import {
   publishPost,
   type BoardAuthor,
@@ -42,6 +43,14 @@ function makeDir(t: test.TestContext, label: string): string {
 
 /** Creates a live watcher plus a recorder for deliveries and errors. */
 function makeWatcher(t: test.TestContext, dir: string) {
+  // Production watchers are unref'd so they cannot keep omp alive. The standalone
+  // test needs a host-like live handle while awaiting real filesystem events.
+  const host = new MessageChannel();
+  host.port1.on("message", () => {});
+  t.after(() => {
+    host.port1.close();
+    host.port2.close();
+  });
   const delivered: BoardPost[] = [];
   const batchSizes: number[] = [];
   const errors: Error[] = [];
