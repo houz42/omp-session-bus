@@ -2,6 +2,18 @@
 
 Notable behavior changes in omp-session-bus. Dates are not tracked here; versions map to the repository history.
 
+## 0.5.0
+
+`session:all` broadcast announcements: one message fanned out to every live same-user endpoint except the sender.
+
+- **`send` to `session:all`**: takes one fresh discovery snapshot, drops the sender, and delivers one identical announcement to each remaining live endpoint — regardless of board watches; this is not watch fan-out. Each recipient gets the same message id; delivery is a non-interrupting aside through the same native injection path (idle sessions wake, which can incur a model cost — preview the recipient set first when unsure).
+- **`cwd` filter**: optional exact absolute working-directory match — no prefix or relative interpretation; a matching-nothing `cwd` is a valid empty result. `cwd` is the only recipient control: `from`, `status`, `limit`, `grep`, `author`, `since`, `before`, `ttl`, `id`, and `timeout` are all rejected on `session:all`, so nothing can silently narrow or broaden an "all" broadcast — preview the full snapshot and send direct messages instead.
+- **`preview` (read-only)**: `{"op":"send","to":"session:all","preview":true}` lists the recipients without sending anything; `message` may be omitted. A preview is advisory, not a reservation — a later send takes a fresh snapshot. Approval-wise a preview is read-tier while an actual broadcast is write-tier (host policy determines confirmation).
+- **Receipts**: per recipient `{to, outcome: injected|failed, attempted, error?, messageId?}`; any failed receipt makes the whole call `isError: true` even when others were injected (partial delivery is never silent). No subscriber-count acknowledgments, no auto-replies (a recipient may still answer with a separate direct message), no retries, no offline queueing — `attempted:true` + `failed` is ambiguous, do not resend automatically. An empty snapshot (no other live session) succeeds with zero receipts.
+- **Cancellation**: before or during discovery the call errors with no deliveries and no receipts; during the send phase it is recorded per recipient — `attempted:false` marks recipients whose turn never came; already-attempted recipients remain ambiguous.
+- **Wire compatibility**: envelopes carry a `broadcast` marker so up-to-date recipients render the aside as an announcement and never let it satisfy direct-message `wait`/`await` waiters; the body is prefixed with a fixed `Broadcast announcement — no reply expected.` header (counted within the 16 KiB body cap) so older plugin versions — which drop the unknown marker — still see the intent, though they may treat it as an ordinary direct message. Update recipients to 0.5.0 for full semantics.
+- **`await`/`replyTo` rejected** on broadcasts, and `op:wait` from `session:all` is rejected — announcements are one-way, with no way to await or thread a reply.
+
 ## 0.4.0
 
 Opt-in board watches: nonblocking subscriptions that wake a session when matching posts appear. Boards stay pull-only by default — publishing still notifies no one unless a session explicitly watches.

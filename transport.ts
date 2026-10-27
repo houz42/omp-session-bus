@@ -43,6 +43,8 @@ export interface Envelope {
   to: string;
   body: string;
   replyTo?: string;
+  /** Announcement fan-out, not a direct reply. */
+  broadcast?: boolean;
   ts: number;
 }
 
@@ -58,6 +60,7 @@ export interface StartOptions {
 export interface SendOptions {
   id?: string;
   replyTo?: string;
+  broadcast?: boolean;
   signal?: AbortSignal;
 }
 
@@ -393,7 +396,7 @@ function parseEnvelope(raw: unknown, ownId: string): Envelope {
       "invalid_message",
       "the message must be a JSON object",
     );
-  const { id, from, to, body, replyTo, ts } = raw;
+  const { id, from, to, body, replyTo, broadcast, ts } = raw;
   if (
     typeof id !== "string" ||
     id.length === 0 ||
@@ -443,15 +446,23 @@ function parseEnvelope(raw: unknown, ownId: string): Envelope {
       "the message replyTo must be a non-empty string of at most 256 bytes",
     );
   }
+  if (broadcast !== undefined && typeof broadcast !== "boolean")
+    throw new FrameError("invalid_message", "broadcast must be a boolean");
   if (typeof ts !== "number" || !Number.isFinite(ts)) {
     throw new FrameError(
       "invalid_message",
       "the message ts must be a finite number",
     );
   }
-  return replyTo === undefined
-    ? { id, from, to, body, ts }
-    : { id, from, to, body, replyTo, ts };
+  return {
+    id,
+    from,
+    to,
+    body,
+    ts,
+    ...(replyTo === undefined ? {} : { replyTo }),
+    ...(broadcast === undefined ? {} : { broadcast }),
+  };
 }
 
 /** Validate the info payload of a peer reply; the claimed id must match the socket it answered on. */
@@ -658,7 +669,7 @@ export class SessionTransport {
         Array.isArray(options))
     )
       throw new Error("options must be an object");
-    const { id = randomUUID(), replyTo, signal } = options ?? {};
+    const { id = randomUUID(), replyTo, signal, broadcast } = options ?? {};
     if (
       typeof id !== "string" ||
       id.length === 0 ||
@@ -678,6 +689,8 @@ export class SessionTransport {
         "options.replyTo must be a non-empty string of at most 256 bytes",
       );
     }
+    if (broadcast !== undefined && typeof broadcast !== "boolean")
+      throw new Error("options.broadcast must be a boolean");
     if (typeof to !== "string" || !SESSION_ID_RE.test(to)) {
       throw new Error(
         `invalid session address ${JSON.stringify(to)}; expected session:<uuid> with lowercase hex`,
@@ -695,10 +708,15 @@ export class SessionTransport {
       );
     }
     if (signal?.aborted) throw abortError("send cancelled before delivery");
-    const envelope: Envelope =
-      replyTo === undefined
-        ? { id, from: this.id, to, body, ts: Date.now() }
-        : { id, from: this.id, to, body, replyTo, ts: Date.now() };
+    const envelope: Envelope = {
+      id,
+      from: this.id,
+      to,
+      body,
+      ts: Date.now(),
+      ...(replyTo === undefined ? {} : { replyTo }),
+      ...(broadcast === undefined ? {} : { broadcast }),
+    };
     const socketPath = join(
       this.directory,
       `${to.slice(SESSION_PREFIX.length)}.sock`,

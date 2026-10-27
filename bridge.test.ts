@@ -291,3 +291,100 @@ test("board subscriptions end on session switch and old watch ids cannot cancel 
     await f.close();
   }
 });
+
+test("broadcast announcements do not consume an awaited direct reply", async () => {
+  const f = await fixture();
+  let peer: SessionTransport | undefined;
+  try {
+    peer = await SessionTransport.start({
+      directory: f.directory,
+      info: () => ({
+        sessionId: "peer",
+        name: "Peer",
+        cwd: f.directory,
+        pid: process.pid,
+        state: "idle",
+      }),
+      receive: async (message) => {
+        assert.ok(peer);
+        await peer.send(message.from, "Announcement", { broadcast: true });
+        await peer.send(message.from, "Direct reply");
+      },
+    });
+    const result = await f.tool.execute(
+      "ask",
+      { op: "send", to: peer.id, message: "Question", await: true },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(result.isError, undefined);
+    assert.match(result.content[0].text, /Direct reply/);
+    assert.equal(f.injected.length, 1);
+    assert.match(f.injected[0].content, /broadcast announcement/);
+    assert.match(f.injected[0].content, /Announcement/);
+  } finally {
+    await peer?.close();
+    await f.close();
+  }
+});
+
+test("broadcast preview is read-only and actual sends retain write approval", async () => {
+  const f = await fixture();
+  const incoming: Envelope[] = [];
+  const peer = await SessionTransport.start({
+    directory: f.directory,
+    info: () => ({
+      sessionId: "peer",
+      name: "Peer",
+      cwd: f.directory,
+      pid: process.pid,
+      state: "idle",
+    }),
+    receive: (message) => {
+      incoming.push(message);
+    },
+  });
+  try {
+    assert.equal(
+      f.tool.approval({ op: "send", to: "session:all", preview: true }),
+      "read",
+    );
+    assert.equal(
+      f.tool.approval({ op: "send", to: "session:all", message: "Notice" }),
+      "write",
+    );
+    const preview = await f.tool.execute(
+      "preview",
+      { op: "send", to: "session:all", preview: true },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(preview.isError, undefined);
+    assert.equal(incoming.length, 0);
+    const rejected = await f.tool.execute(
+      "await",
+      { op: "send", to: "session:all", message: "Notice", await: true },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(rejected.isError, true);
+    assert.equal(incoming.length, 0);
+    const sent = await f.tool.execute(
+      "send",
+      { op: "send", to: "session:all", message: "Notice" },
+      undefined,
+      undefined,
+      f.context,
+    );
+    assert.equal(sent.isError, undefined);
+    assert.equal(incoming.length, 1);
+    assert.equal(incoming[0].broadcast, true);
+    assert.match(incoming[0].body, /Broadcast announcement/);
+  } finally {
+    await peer.close();
+    await f.close();
+  }
+});

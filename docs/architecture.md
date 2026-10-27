@@ -6,7 +6,7 @@ omp-session-bus is a single omp extension whose parts cooperate:
 - [`board-store.ts`](../board-store.ts) — persistent, pull-only board posts as immutable JSON files.
 - `index.ts` — plugin wiring: registers the plugin's own `session_bus` tool in the extension factory (before any session starts) and wires session lifecycle, dispatch, and the `/sessions` command. See [Plugin wiring](#plugin-wiring).
 
-`board.ts` implements the board operations on top of `board-store.ts` and owns their help text. `board-watch.ts` implements the opt-in board watches (see [Board watches](#board-watches)): in-process subscriptions that deliver matching new posts to their own session as asides. Watch state lives only in the session process — nothing about watches is persisted to the board directory.
+`board.ts` implements the board operations on top of `board-store.ts` and owns their help text. `board-watch.ts` implements the opt-in board watches (see [Board watches](#board-watches)): in-process subscriptions that deliver matching new posts to their own session as asides. Watch state lives only in the session process — nothing about watches is persisted to the board directory. `broadcast.ts` implements the `session:all` announcement fan-out (see [Broadcast](#broadcast)).
 
 ## Transport: socket-per-session
 
@@ -35,11 +35,20 @@ reply    {"type":"info","ok":true,"info":{...PeerInfo}}
 - A send resolves only after the receiving session's `receive` callback settled without error. There is no message log, no automatic reply, and no retry: **an unacknowledged send is ambiguous by design**.
 - Per-request budget is 5 seconds on both sides; requests are capped at ~100 KiB (`MAX_FRAME_BYTES`, derived from the 16 KiB body cap plus escaping headroom).
 - Inbound concurrency is capped at 32 connections; excess connections receive an `overloaded` error.
-- Envelope validation is strict: only known fields (`id`, `from`, `to`, `body`, `replyTo`, `ts`) survive parsing; unknown fields are dropped.
+- Envelope validation is strict: only known fields (`id`, `from`, `to`, `body`, `replyTo`, `broadcast`, `ts`) survive parsing; unknown fields are dropped.
 
 ### Discovery
 
 `list()` reads the directory, probes each `*.sock` concurrently (max 8), and returns every socket that answers an `info` probe with a valid `PeerInfo` whose claimed id matches its socket name. Unreachable, unsafe, or garbage peers are skipped — never unlinked. The result is self plus peers, sorted by address.
+
+### Broadcast
+
+`broadcast.ts` implements the `session:all` fan-out on top of the transport:
+
+- **Snapshot-then-send.** Each call takes one fresh `list()` discovery snapshot, drops the sender, and optionally narrows by an exact absolute `cwd` string comparison. Only those recipients are dialed — sessions that start later are never included, and there is no queue, replay, or future-arrival delivery. An empty snapshot is a valid broadcast with zero receipts.
+- **Bounded fan-out.** Recipients are dialed by at most 8 concurrent workers sharing a work queue; each recipient gets exactly one attempt, and the shared failure semantics of a single send apply per recipient. Cancellation before or during discovery aborts with an error and no receipts; during the send phase it is recorded per recipient (`attempted:false` for turns that never came).
+- **Receipts.** The result carries the snapshot (`recipients`), one `messageId` shared by every recipient, and one receipt per recipient (`to`, `outcome` `injected`/`failed`, `attempted`, `error?`, `messageId?`). One failed receipt marks the whole call `isError: true`. The announcement body is prefixed with a fixed `Broadcast announcement — no reply expected.` header (counted against the 16 KiB body cap) so older recipients that lack the wire marker still see the intent in plain text.
+- **Wire marker.** The transport carries `broadcast:true` on the envelope. New recipients render the aside as a broadcast announcement and exclude it from direct-message waiter resolution; older plugin versions drop the unknown field (strict parsing) and treat the message as an ordinary direct message aside — the header text is the compatibility fallback.
 
 ### Lifecycle and crash behavior
 
@@ -63,9 +72,9 @@ There is **no manifest, index, or lock** — the directory listing is the catalo
 `index.ts` registers the plugin's own `session_bus` tool synchronously in the extension factory, before any session starts — this is what makes `--tools session_bus` launch filtering work on every supported host. The socket transport and TUI renderers are initialized later, at session start. There is a single code path on every host:
 
 1. **Tool registration.** The tool exposes exactly `sessions`, `send`, `wait`, `list`, `topics`, `watch`, `watches`, and `unwatch`, with a description embedding the operation guides. It never wraps, replaces, or delegates to omp's native `hub`/`wait` tools; any operation outside the cross-session surface is rejected with an error that lists the supported operations and notes that native tools are separate.
-2. **Approval boundary.** `approval()` classifies `send` to a `board:` address as `write`; every other operation is `read`.
-3. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `op:watch`/`op:watches`/`op:unwatch` → board watch manager; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; anything else is rejected.
-4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first. Board watch notifications use the same injection path and the same native rendering.
+2. **Approval boundary.** `approval()` classifies `send` to a `board:` address as `write`, and `send` to `session:all` as `write` unless it is a `preview` (read); every other operation is `read`. The host's approval policy determines what confirmation each tier requires.
+3. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `op:watch`/`op:watches`/`op:unwatch` → board watch manager; `send` to `session:all` → `broadcast()`; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; anything else is rejected.
+4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first — broadcast-marked envelopes are excluded, so a broadcast never satisfies a direct-message waiter. Board watch notifications use the same injection path and the same native rendering.
 5. **`/sessions` command.** Registry listing and manual send, surfaced both as a UI notification and an agent-visible message.
 6. **Renderer reuse.** In TUI mode, `host-renderer.ts` reuses the host's native hub/wait tool renderers (`toolRenderers.hub`, falling back to `toolRenderers.wait`) so cross-session calls render like native IRC cards. This is an internal presentation detail, not a public API; the renderer loads lazily at session start and RPC/JSON modes work without it.
 
