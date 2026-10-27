@@ -556,18 +556,7 @@ export async function readPosts(
   options?: BoardReadOptions,
 ): Promise<BoardPage> {
   const opts: BoardReadOptions = options ?? {};
-  const topic =
-    opts.topic === undefined
-      ? undefined
-      : requireString(opts.topic, "topic", TOPIC_MAX_BYTES).trim();
-  const query =
-    opts.query === undefined
-      ? undefined
-      : requireString(opts.query, "query", 1_024).trim();
-  const author =
-    opts.author === undefined
-      ? undefined
-      : requireString(opts.author, "author", AUTHOR_NAME_MAX_BYTES).trim();
+  const filters = normalizeBoardFilters(opts);
   let sinceMs: number | undefined;
   if (opts.since !== undefined) {
     const since = requireString(opts.since, "since", 40);
@@ -607,24 +596,75 @@ export async function readPosts(
     throw new Error(`cannot list board directory ${dir}: ${message(error)}`);
   }
 
-  const needle = query === undefined ? undefined : query.toLowerCase();
   const posts: BoardPost[] = [];
   for (const name of names.filter(isPostFileName).sort(compareDescending)) {
     const id = name.slice(0, -".json".length);
     if (before !== undefined && id >= before) continue; // exclusive cursor
     const post = await readPostFile(dir, name);
     if (post === undefined) continue; // vanished mid-read (e.g. GC)
-    if (topic !== undefined && post.topic !== topic) continue;
     if (Date.parse(post.expiresAt) <= Date.now()) continue; // expired
-    if (author !== undefined && !postMatchesAuthor(post, author)) continue;
     if (sinceMs !== undefined && Date.parse(post.createdAt) < sinceMs) continue;
-    if (needle !== undefined && !postMatchesQuery(post, needle)) continue;
+    if (!matchesBoardFilters(post, filters)) continue;
     posts.push(post);
     if (posts.length === limit + 1) break; // one extra proves more matches exist
   }
   if (posts.length <= limit) return { posts };
   const page = posts.slice(0, limit);
   return { posts: page, nextCursor: page[page.length - 1].id };
+}
+
+/** Private board access shared by subscriptions; snapshots contain only committed post IDs. */
+export async function openBoardReader(directory?: string) {
+  const dir = resolveBoardDir(directory);
+  await ensureBoardDir(dir);
+  return {
+    directory: dir,
+    async snapshot(): Promise<string[]> {
+      verifyBoardDir(dir, await lstat(dir));
+      return (await readdir(dir))
+        .filter(isPostFileName)
+        .map((name) => name.slice(0, -5));
+    },
+    async read(id: string): Promise<BoardPost | undefined> {
+      validateBefore(id);
+      verifyBoardDir(dir, await lstat(dir));
+      return readPostFile(dir, `${id}.json`);
+    },
+  };
+}
+
+/** Filters shared by voluntary reads and future-post subscriptions. */
+export function normalizeBoardFilters(options: {
+  topic?: string;
+  query?: string;
+  author?: string;
+}) {
+  return {
+    topic:
+      options.topic === undefined
+        ? undefined
+        : requireString(options.topic, "topic", TOPIC_MAX_BYTES).trim(),
+    query:
+      options.query === undefined
+        ? undefined
+        : requireString(options.query, "query", 1_024).trim(),
+    author:
+      options.author === undefined
+        ? undefined
+        : requireString(options.author, "author", AUTHOR_NAME_MAX_BYTES).trim(),
+  };
+}
+
+export function matchesBoardFilters(
+  post: BoardPost,
+  filters: { topic?: string; query?: string; author?: string },
+): boolean {
+  return (
+    (filters.topic === undefined || post.topic === filters.topic) &&
+    (filters.author === undefined || postMatchesAuthor(post, filters.author)) &&
+    (filters.query === undefined ||
+      postMatchesQuery(post, filters.query.toLowerCase()))
+  );
 }
 
 // Topic listing over unexpired posts. Pagination is by alphabetic topic
