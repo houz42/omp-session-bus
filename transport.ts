@@ -761,7 +761,7 @@ export class SessionTransport {
     if (error instanceof RequestError) {
       if (error.kind === "offline")
         return new Error(
-          `target session ${to} is not reachable; it may be offline (use hub sessions to see live sessions)`,
+          `target session ${to} is not reachable; it may be offline (use session_bus sessions to see live sessions)`,
         );
       if (error.kind === "timeout") {
         return new Error(
