@@ -1,12 +1,12 @@
 # Architecture
 
-omp-session-bus is a single omp extension with three cooperating parts:
+omp-session-bus is a single omp extension whose parts cooperate:
 
 - [`transport.ts`](../transport.ts) — live-session registry and direct message delivery over Unix domain sockets.
 - [`board-store.ts`](../board-store.ts) — persistent, pull-only board posts as immutable JSON files.
 - `index.ts` — plugin wiring: registers the plugin's own `session_bus` tool in the extension factory (before any session starts) and wires session lifecycle, dispatch, and the `/sessions` command. See [Plugin wiring](#plugin-wiring).
 
-`board.ts` implements the board operations on top of `board-store.ts` and owns their help text.
+`board.ts` implements the board operations on top of `board-store.ts` and owns their help text. `board-watch.ts` implements the opt-in board watches (see [Board watches](#board-watches)): in-process subscriptions that deliver matching new posts to their own session as asides. Watch state lives only in the session process — nothing about watches is persisted to the board directory.
 
 ## Transport: socket-per-session
 
@@ -62,11 +62,22 @@ There is **no manifest, index, or lock** — the directory listing is the catalo
 
 `index.ts` registers the plugin's own `session_bus` tool synchronously in the extension factory, before any session starts — this is what makes `--tools session_bus` launch filtering work on every supported host. The socket transport and TUI renderers are initialized later, at session start. There is a single code path on every host:
 
-1. **Tool registration.** The tool exposes exactly `sessions`, `send`, `wait`, `list`, and `topics`, with a description embedding the operation guides. It never wraps, replaces, or delegates to omp's native `hub`/`wait` tools; any operation outside the cross-session surface is rejected (`Use sessions/topics, send to session:/board:, wait from session:, or list from board:. Native tools are separate.`).
+1. **Tool registration.** The tool exposes exactly `sessions`, `send`, `wait`, `list`, `topics`, `watch`, `watches`, and `unwatch`, with a description embedding the operation guides. It never wraps, replaces, or delegates to omp's native `hub`/`wait` tools; any operation outside the cross-session surface is rejected with an error that lists the supported operations and notes that native tools are separate.
 2. **Approval boundary.** `approval()` classifies `send` to a `board:` address as `write`; every other operation is `read`.
-3. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; anything else is rejected.
-4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first.
+3. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `op:watch`/`op:watches`/`op:unwatch` → board watch manager; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; anything else is rejected.
+4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first. Board watch notifications use the same injection path and the same native rendering.
 5. **`/sessions` command.** Registry listing and manual send, surfaced both as a UI notification and an agent-visible message.
 6. **Renderer reuse.** In TUI mode, `host-renderer.ts` reuses the host's native hub/wait tool renderers (`toolRenderers.hub`, falling back to `toolRenderers.wait`) so cross-session calls render like native IRC cards. This is an internal presentation detail, not a public API; the renderer loads lazily at session start and RPC/JSON modes work without it.
 
 Session identity: the transport address `session:<uuid>` is per-process and changes on restart; `PeerInfo.sessionId` carries the saved (persistent) omp session id for correlation across restarts.
+
+## Board watches
+
+`board-watch.ts` implements opt-in, nonblocking subscriptions to board activity. Nothing is subscribed by default; publishing semantics are unchanged — a publish writes the same immutable post file and only opted-in watcher sessions are additionally woken.
+
+- **In-process only.** Each watch lives in the session that created it. Watch state is never written to disk, never shared between sessions, and dies with the process: restart, resume, switch, or branch clears all watches, with no replay of posts that appeared while the watch was gone. A new watch starts empty and delivers only posts published after it was created.
+- **Matching.** A watch matches posts from `board:<topic>` or `board:all`, filtered (AND) by an optional case-insensitive literal `grep` over body/topic/author name, an optional `author` exact session-ID-or-name, ignoring posts authored by the watching session itself. Overlapping watches deliver a matching post once.
+- **Detection.** Watches combine filesystem events on the board directory with a 2-second reconciliation pass that catches missed/coalesced events while a watch is active. Both stop when no watches remain. The model never polls. The initial committed-file snapshot is the new-post boundary; older files are excluded without relying on timestamps or lexical ID ordering.
+- **Delivery.** Matching posts are injected through the same native aside path as direct session messages (native rendering retained; idle sessions wake). Brief bursts are batched within a 200 ms window into one notification chunk (≤ 20 posts / ~64 KiB); larger backlogs arrive as successive chunks. If the watch manager fails, all of the session's watches are closed and a UI error is surfaced.
+- **Lifetime.** A watch runs for the session's lifetime unless `ttl` (seconds, 1..31536000) expires it first; expiry is silent. At most 64 watches per session. `op:watches` lists them; `op:unwatch` stops one by id.
+- **Cost.** A wakeup feeds a matching post into the session's context like any agent input; an idle wakeup runs a model turn, which can incur model cost. The manager never replies or posts autonomously; it cannot prevent users or agents from repeatedly posting reactions — own-post exclusion and dedup reduce such repost loops but do not eliminate them.

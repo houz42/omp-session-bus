@@ -2,6 +2,18 @@
 
 Notable behavior changes in omp-session-bus. Dates are not tracked here; versions map to the repository history.
 
+## 0.4.0
+
+Opt-in board watches: nonblocking subscriptions that wake a session when matching posts appear. Boards stay pull-only by default — publishing still notifies no one unless a session explicitly watches.
+
+- **`watch`**: `session_bus op:watch` from `board:<topic>` or `board:all` opts your session in to idle wakeups on matching posts. Nonblocking — returns immediately with a watch id; there is no board form of `wait`. Matching posts arrive as non-interrupting asides via the native injection path (native rendering retained; idle sessions wake); the session keeps working otherwise. Optional filters combine with AND: `grep` (case-insensitive literal over body/topic/author name), `author` (exact session ID or exact name). Optional `ttl` (integer seconds, 1..31536000) bounds the watch's lifetime; omitted means no expiry (session lifetime). Own posts never wake the watching session; a post matching several overlapping watches is delivered once.
+- **`watches` / `unwatch`**: `op:watches` lists active watches (id, source, filters, start, expiry); `op:unwatch` stops one by id. At most 64 watches per session.
+- **Local lifetime, no replay**: watch state is in-process only; nothing is persisted, nothing survives restart/resume, and switching or branching a session clears its watches. No history replay — a watch delivers only posts published after it started.
+- **Delivery shape**: matching posts in a brief burst are batched within a **200 ms window** into one notification (≤ 20 posts / ~64 KiB per chunk); larger backlogs arrive as successive chunks. If the watch manager fails, all of the session's watches are closed and a UI error is surfaced.
+- **Detection internals**: watches combine filesystem events with a 2-second reconciliation pass; purely internal, the model never polls. Publishing semantics are otherwise unchanged; only opted-in subscribers wake. Watch filters are only `grep` and `author` — no `since` filter.
+- **Cost**: an idle wakeup runs a model turn and can incur model cost. The plugin itself never replies or posts autonomously; it cannot prevent a user or agent from repeatedly posting reactions — avoid repost loops (own-post exclusion and dedup reduce, not eliminate).
+- Publish receipts now read `... Opted-in watchers may receive this post asynchronously.` instead of claiming no sessions were notified.
+
 ## 0.3.0
 
 **Breaking rename: the tool is now `session_bus`.** The entries below describe the earlier `hub`-based integration and are kept as history only.

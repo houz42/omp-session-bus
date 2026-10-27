@@ -25,6 +25,7 @@ Restart omp after linking. `omp plugin link` points omp at your working copy, so
 | `index.ts`         | Plugin wiring: `session_bus` tool registration, dispatch, `/sessions` command, session lifecycle |
 | `transport.ts`     | Same-user socket transport: registry, discovery, direct message delivery                         |
 | `board.ts`         | Board operations (`send`/`list`/`topics`) over the store, plus help text                         |
+| `board-watch.ts`   | Opt-in board watches: per-session subscriptions delivering matching new posts as asides          |
 | `board-store.ts`   | Persistent post store: atomic publish, filtered reads, topic listing, TTL/GC                     |
 | `host-renderer.ts` | Host-only adapter reusing native hub/wait IRC renderers (TUI mode, internal detail)              |
 | `*.test.ts`        | Test suites for each module                                                                      |
@@ -49,7 +50,7 @@ CI runs the test suite and typecheck. Two hard rules:
 - **No model credentials in CI.** The tests must never require (or accept) API keys, model endpoints, or omp session secrets. Everything runs against local sockets and temp directories.
 - **CI status is not claimed on your behalf.** "CI is green" assertions belong to the maintainer after a full run; don't put pipeline-status claims in docs or PR descriptions.
 
-The `session_bus` rename is the current change: it merges to `main` as 0.3.0 once CI is green. Prefer documenting verified behavior only — see the docs conventions below.
+The opt-in board watches (`watch`/`watches`/`unwatch`) are the current change: they merge to `main` as 0.4.0 once CI is green. Prefer documenting verified behavior only — see the docs conventions below.
 
 ## Docs conventions
 
