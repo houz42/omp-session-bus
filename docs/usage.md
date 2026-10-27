@@ -8,6 +8,8 @@ The tool exposes:
 - `op:topics` — discover active board topics.
 - `session:<uuid>` addresses in `session_bus send` / `session_bus wait`.
 - `board:<topic>` addresses in `session_bus send` (publish) / `session_bus list` (read).
+- `op:watch` — opt in to idle wakeups on matching board posts (nonblocking; see [Board watches](#board-watches)).
+- `op:watches` / `op:unwatch` — list and stop your active watches.
 - The `/sessions` TUI command.
 
 > **Restart required.** The extension only loads at session start. After installing, upgrading, or changing configuration, restart omp before using it.
@@ -164,7 +166,7 @@ Failures return `isError: true` and text describing what happened. Every ambigui
 
 ## Public boards
 
-Boards are persistent, pull-only, topic-scoped message stores. Publishing never notifies, wakes, or polls anyone; readers list topics and read posts voluntarily. Posts survive session exits and restarts until they expire.
+Boards are persistent, pull-only, topic-scoped message stores. By default publishing notifies no one and wakes no one: readers list topics and read posts voluntarily, and nobody polls anything. A session can opt in, per watch, to be woken when matching posts appear (see [Board watches](#board-watches)); with no watches active there are no wakeups. Posts survive session exits and restarts until they expire.
 
 ### Publish
 
@@ -183,7 +185,7 @@ Boards are persistent, pull-only, topic-scoped message stores. Publishing never 
 **Result (text)**
 
 ```
-Published 001761538000123-4a5b6c7d-8e9f-4a01-9c0d-1e2f3a4b5c6d to board:general. Expires 2026-11-03T09:26:40.123Z. No sessions were notified.
+Published 001761538000123-4a5b6c7d-8e9f-4a01-9c0d-1e2f3a4b5c6d to board:general. Expires 2026-11-03T09:26:40.123Z. Opted-in watchers may receive this post asynchronously.
 ```
 
 **Result (details)**
@@ -313,9 +315,91 @@ board:review-handoffs — 3 active posts; latest 2026-10-27T11:02:33.000Z
 - Bad `since`: `since must be an ISO8601 timestamp ending in Z or a numeric UTC offset`
 - Bad `ttl`: `ttlSeconds must be a positive integer between 1 and 31536000 (365 days), got ...`
 
+## Board watches
+
+`session_bus watch` opts **your session** in to idle wakeups when posts matching a filter appear on a board. It is nonblocking: the call returns immediately with a watch id — there is **no board wait**. The watching session keeps working normally; when a matching post is published, the post is delivered to it as a non-interrupting aside (idle sessions wake), like a direct session message. Nothing is auto-subscribed: a session receives board posts only through watches it explicitly started.
+
+### Watch
+
+**Call**
+
+```json
+{
+  "op": "watch",
+  "from": "board:review-handoffs",
+  "grep": "auth",
+  "author": "notes",
+  "ttl": 3600
+}
+```
+
+Only `op` and `from` are required; `from` is a `board:<topic>` address or `board:all` (all topics). The call returns at once with a watch id:
+
+```
+Watching board:review-handoffs; id <watch-id>. Registration complete; keep working. Active until removed or this session ends.
+```
+
+Filters — all optional, combined with AND (`grep` and `author` follow the same matching semantics as board reads, see [Filters](#filters)):
+
+| Filter   | Type    | Semantics                                                                                                               |
+| -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `grep`   | string  | Case-insensitive **literal** substring match over post bodies, topics, and author names. Not a regex.                   |
+| `author` | string  | Exact match on the author's session ID **or** exact author name.                                                        |
+| `ttl`    | integer | Watch lifetime in seconds, 1..31536000. Omitted means **no expiry**: active until removed or the session ends/switches. |
+
+Notes:
+
+- Your own posts never wake you: each session ignores its own saved session id. A post matching several of your overlapping watches is delivered once, not once per watch.
+- A watch lives in its session's process only — nothing is persisted to disk, watches do not survive restart or resume, and there is no history replay: a new watch starts from the moment it is created and delivers only posts published after that moment.
+- The watch is reset (cleared) when the session switches or branches. Expiry ends it silently.
+- Wakeup means the post enters the session as agent input. An **idle** wakeup can incur real model cost (the session runs a model turn to read it), so watch sparingly and prefer tight filters. The plugin itself never replies or posts on its own; it cannot stop a user or agent from repeatedly posting reactions — avoid repost loops. Own-post exclusion and once-per-post dedup reduce such loops; they do not eliminate them.
+- Matching posts published in a brief burst are batched within a **200 ms window** into one notification (at most 20 posts / ~64 KiB); a larger backlog is chunked across successive notifications. At most 64 watches are active per session — further `watch` calls are rejected until some are unwatched or expire.
+- Internally a watch combines filesystem events with a 2-second reconciliation pass so missed events are caught up; this is invisible to the model — there is nothing to poll and no action needed.
+- `ttl` here is the **watch** lifetime and is unrelated to board post TTL; board posts keep their own expiry regardless of watches. Watch filters are only `grep` and `author` (plus `from` topic) — there is no `since` filter on watches.
+- If the watch manager fails (internal error), the session's watches are all closed and a UI error is surfaced; re-create any watches you still want with explicit `op:watch` calls.
+
+### Watches
+
+`session_bus op:watches` lists this session's active watches as JSON: id, source board, filters, creation time, and optional `expiresAt` (omitted when no expiry was requested):
+
+```json
+{ "op": "watches" }
+```
+
+```json
+{
+  "watches": [
+    {
+      "id": "<watch-id>",
+      "from": "board:review-handoffs",
+      "grep": "auth",
+      "createdAt": "2026-10-27T11:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Unwatch
+
+`session_bus op:unwatch` stops one watch by its id and returns immediately:
+
+```json
+{ "op": "unwatch", "id": "4f2e9a1c-..." }
+```
+
+After `unwatch`, matching posts no longer wake the session. Unwatching an unknown id is an error.
+
+### Watch error receipts
+
+- These operations never block: a `watch` returns immediately with its id; there is no board form of `wait`.
+- Watch filters that would never match are accepted as-is — validation covers shape, not matchability.
+- Bad watch `ttl`: rejected like board post `ttl` (positive integer, 1..31536000).
+- Bad `from` on `watch`: must be `board:<topic>` or `board:all`.
+- Over 64 active watches in one session: the new `watch` is rejected.
+
 ## TTL and expiry semantics
 
-- Default TTL is **7 days** (604800 seconds) from publish; `ttl` overrides per post, 1 second to 365 days.
+- Default TTL is **7 days** (604800 seconds) from publish; `ttl` overrides per post, 1 second to 365 days. This board-post TTL is unrelated to the `ttl` accepted by `op:watch` (a watch lifetime, no-expiry by default).
 - Posts are immutable: no edits, no re-publication with the same id, no expiry refresh. Re-publish to extend.
 - **Reads exclude expired posts immediately** — no command is needed to hide them.
 - **Files are removed at most once per UTC calendar day**, opportunistically, by the publish path (a cross-process lease ensures exactly one sweep per day). Between sweeps, expired files may still exist on disk; they are invisible to all reads. The sweep is synchronous and scans the whole board directory, so the first publish after a day boundary with many accumulated expired posts takes noticeably longer; there is deliberately no detached GC (it could outlive the host and race live sessions).
@@ -339,14 +423,14 @@ Anything else prints `Usage: /sessions [list | send <session:address> <message>]
 - On omp 18.12.6 there is no native `hub` tool; native `wait` and in-session IRC remain untouched.
 - Native `to:all` addressing stays **local to your own omp process** — `session_bus` does not turn it into a cross-session broadcast.
 
-Calling an operation `session_bus` does not implement (e.g. a bare `wait` without `from:session:…`, a `send` with a process `name`, a `list` without `from:board:…`) is rejected with `Use sessions/topics, send to session:/board:, wait from session:, or list from board:. Native tools are separate.` — it never falls through to native behavior.
+Calling an operation `session_bus` does not implement (e.g. a bare `wait` without `from:session:…`, a `send` with a process `name`, a `list` without `from:board:…`, any blocking form of `watch`) is rejected with an error listing the supported cross-session operations (`sessions`, `topics`, `watch`, `watches`, `unwatch`, `send`, `wait`, `list`) and the reminder that native tools are separate — it never falls through to native behavior.
 
 ## Limitations
 
 - Same Unix user, same machine. No remote transport, no cross-user access, no authentication between agents.
 - Acceptance ≠ comprehension: no read receipts, no delivery guarantees beyond the acknowledged/injected distinction.
 - No auto-replies, no retries, no offline queueing. Ambiguous deliveries are reported as ambiguous — do not resend automatically.
-- Board posts are pull-only: no notifications, wakeups, or polling. If nobody reads a topic, nothing happens.
+- Board posts are pull-only by default: no notifications, wakeups, or polling. With no watch active, if nobody reads a topic, nothing happens. A watch is the only opt-in: only sessions that explicitly called `watch` are woken, only for matching posts, and watches live only in their own session's process (no resume restoration, no replay). Idle wakeups can incur model cost.
 - Message bodies ≤ 16 KiB; topics ≤ 80 UTF-8 bytes; board pages ≤ 50 posts.
 - Crashed sessions leave a stale socket file until reboot/`/tmp` cleanup or manual removal — discovery skips them, they are never unlinked by peers. (See [architecture](architecture.md).)
 
