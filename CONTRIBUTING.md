@@ -13,21 +13,21 @@ omp plugin link "$(pwd)"   # run your checkout inside omp
 
 Restart omp after linking. `omp plugin link` points omp at your working copy, so every session start loads your current edits (restart again after structural changes).
 
-- **omp 18.2.6 or 18.12.6** to exercise the plugin in a live host. The hub topology differs per version (native-hub wrapper on 18.2.6; standalone cross-session-only `hub` on 18.12.6) — see [installation](docs/installation.md). Intermediate versions are unverified; 18.12.6 support is tested on the acceptance branch but not yet released.
+- **omp 18.2.6 or 18.12.6** to exercise the plugin in a live host. The plugin registers the same `session_bus` tool on both (in the extension factory, so `--tools session_bus` works on either); native omp tools are untouched on each. Intermediate versions are unverified.
 
 - **Bun** for dependency install.
 - **Node >= 22.18** to run the tests (they use `node --experimental-strip-types` to execute TypeScript directly; no build step).
 
 ## Layout
 
-| File               | Role                                                                              |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `index.ts`         | Plugin wiring: hub tool wrapper, dispatch, `/sessions` command, session lifecycle |
-| `transport.ts`     | Same-user socket transport: registry, discovery, direct message delivery          |
-| `board.ts`         | Board operations (`send`/`list`/`topics`) over the store, plus help text          |
-| `board-store.ts`   | Persistent post store: atomic publish, filtered reads, topic listing, TTL/GC      |
-| `host-renderer.ts` | Host-only adapter reusing native hub or wait/IRC renderers (TUI mode)             |
-| `*.test.ts`        | Test suites for each module                                                       |
+| File               | Role                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| `index.ts`         | Plugin wiring: `session_bus` tool registration, dispatch, `/sessions` command, session lifecycle |
+| `transport.ts`     | Same-user socket transport: registry, discovery, direct message delivery                         |
+| `board.ts`         | Board operations (`send`/`list`/`topics`) over the store, plus help text                         |
+| `board-store.ts`   | Persistent post store: atomic publish, filtered reads, topic listing, TTL/GC                     |
+| `host-renderer.ts` | Host-only adapter reusing native hub/wait IRC renderers (TUI mode, internal detail)              |
+| `*.test.ts`        | Test suites for each module                                                                      |
 
 ## Tests
 
@@ -40,7 +40,7 @@ npm test
 
 - The suites are plain Node test files (`node:test` + `node:assert`) — no framework install needed, no network, no omp host required. Transport tests stand up real socket directories in temp space; board tests use real directories, so they exercise the actual filesystem semantics.
 - Typecheck with `npm run typecheck` (`tsc --noEmit`).
-- Behavior changes should include focused regression coverage for plausible failures: delivery/cancellation, filtering/pagination/expiry, native delegation and filesystem isolation. Do not pin incidental wording or source text. Keep tests deterministic and isolated.
+- Behavior changes should include focused regression coverage for plausible failures: delivery/cancellation, filtering/pagination/expiry, operation-surface rejection and filesystem isolation. Do not pin incidental wording or source text. Keep tests deterministic and isolated.
 
 ## CI
 
@@ -49,7 +49,7 @@ CI runs the test suite and typecheck. Two hard rules:
 - **No model credentials in CI.** The tests must never require (or accept) API keys, model endpoints, or omp session secrets. Everything runs against local sockets and temp directories.
 - **CI status is not claimed on your behalf.** "CI is green" assertions belong to the maintainer after a full run; don't put pipeline-status claims in docs or PR descriptions.
 
-The project is mid-acceptance: release-acceptance validation is in progress; 18.12.6 compatibility is tested but unreleased. Prefer documenting verified behavior only — see the docs conventions below.
+The `session_bus` rename is the current change: it merges to `main` as 0.3.0 once CI is green. Prefer documenting verified behavior only — see the docs conventions below.
 
 ## Docs conventions
 

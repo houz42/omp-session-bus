@@ -1,23 +1,20 @@
 # Usage
 
-Everything in this plugin goes through the `hub` tool. How `hub` is provided depends on your omp version:
+Everything in this plugin goes through its own `session_bus` tool. The tool registers in the extension factory before any session starts, so it is present on every supported host (omp 18.2.6 and 18.12.6) and `--tools session_bus` launch filtering works on both. omp's native coordination tools (`hub`, `wait`, in-session IRC, processes, jobs) are separate and untouched — `session_bus` neither wraps nor delegates to them.
 
-- **omp 18.2.6** — the plugin wraps the **native** `hub` tool. All native hub operations (processes, jobs, in-session IRC, `wait`, `inbox`, background services) behave exactly as before and are delegated to the native implementation; the plugin adds `op:sessions`, `op:topics`, and the `session:`/`board:` address families.
-- **omp 18.12.6** — there is no native hub. The plugin registers its own `hub` tool exposing **only** the cross-session operations: `sessions`, `topics`, and `send`/`wait`/`list` with explicit `session:`/`board:` addresses. A bare `hub list` (no `board:` address) reports that the native registry is unavailable on this omp version rather than substituting the cross-session list. Also, do not launch omp with `--tools hub` filtering — it would exclude the plugin's tool; the default toolset is fine.
-
-The plugin adds:
+The tool exposes:
 
 - `op:sessions` — discover live omp sessions under your user.
 - `op:topics` — discover active board topics.
-- `session:<uuid>` addresses in `hub send` / `hub wait`.
-- `board:<topic>` addresses in `hub send` (publish) / `hub list` (read).
+- `session:<uuid>` addresses in `session_bus send` / `session_bus wait`.
+- `board:<topic>` addresses in `session_bus send` (publish) / `session_bus list` (read).
 - The `/sessions` TUI command.
 
 > **Restart required.** The extension only loads at session start. After installing, upgrading, or changing configuration, restart omp before using it.
 
 ## Session discovery
 
-`hub op:sessions` lists every live omp session under your user — its own session plus every peer that answers a discovery probe. Sessions that have exited, or sockets left behind by crashed sessions, are skipped silently.
+`session_bus op:sessions` lists every live omp session under your user — its own session plus every peer that answers a discovery probe. Sessions that have exited, or sockets left behind by crashed sessions, are skipped silently.
 
 **Call**
 
@@ -43,7 +40,7 @@ Notes:
 
 ### Send
 
-`hub send` to a `session:` address delivers one message to that live session. There is no offline queue: the target must be live (re-check with `op:sessions`).
+`session_bus send` to a `session:` address delivers one message to that live session. There is no offline queue: the target must be live (re-check with `op:sessions`).
 
 **Call**
 
@@ -129,7 +126,7 @@ Message 5c1f2e3d-... accepted; wait ended without another message from the peer.
 
 ### Wait
 
-`hub wait` with `from:session:<uuid>` blocks up to **30 seconds** (override with `timeout`, 1–300 seconds) for the next message from that peer. The peer must be live at the moment the wait starts.
+`session_bus wait` with `from:session:<uuid>` blocks up to **30 seconds** (override with `timeout`, 1–300 seconds) for the next message from that peer. The peer must be live at the moment the wait starts.
 
 **Call**
 
@@ -148,14 +145,14 @@ Message 0f4e2d1c-... from session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4:
 Here's the list: auth.ts, session.ts, middleware.ts
 ```
 
-On timeout, the result is `Cross-session wait ended without a new message`; on abort, `Cross-session wait cancelled`. A bare `hub wait` without a `from:` address is native hub behavior and unchanged. `from:` cannot be combined with `name`/`ids` (process/job waits).
+On timeout, the result is `Cross-session wait ended without a new message`; on abort, `Cross-session wait cancelled`. A bare `session_bus wait` without a `from:` address is rejected — `wait` requires `from:session:<uuid>`. `from:` cannot be combined with process/job parameters.
 
 ### Error receipts (direct sends)
 
 Failures return `isError: true` and text describing what happened. Every ambiguity is stated as ambiguous — never resend automatically:
 
 - Target not reachable / exited:
-  `target session session:... is not reachable; it may be offline (use list to see live sessions)`
+  `target session session:... is not reachable; it may be offline (use session_bus sessions to see live sessions)`
 - No ack within 5 seconds:
   `target session session:... did not acknowledge within 5 seconds; delivery is ambiguous, do not resend automatically`
 - Peer closed mid-delivery:
@@ -171,7 +168,7 @@ Boards are persistent, pull-only, topic-scoped message stores. Publishing never 
 
 ### Publish
 
-`hub send` to a `board:<topic>` address writes one post.
+`session_bus send` to a `board:<topic>` address writes one post.
 
 **Call**
 
@@ -228,7 +225,7 @@ Rules:
 
 ### Read
 
-`hub list` with `from:board:<topic>` reads that topic; `from:board:all` reads every topic. Posts come back **newest first**, and reading never consumes or deletes them.
+`session_bus list` with `from:board:<topic>` reads that topic; `from:board:all` reads every topic. Posts come back **newest first**, and reading never consumes or deletes them.
 
 **Call**
 
@@ -287,7 +284,7 @@ To continue, replay the same call with `"before": "001761538000123-4a5b6c7d-..."
 
 ### Topics
 
-`hub op:topics` lists topics that currently have at least one unexpired post, **alphabetically ascending**, with active post counts and latest timestamps.
+`session_bus op:topics` lists topics that currently have at least one unexpired post, **alphabetically ascending**, with active post counts and latest timestamps.
 
 **Call**
 
@@ -309,7 +306,7 @@ board:review-handoffs — 3 active posts; latest 2026-10-27T11:02:33.000Z
 ### Board error receipts
 
 - Publishing to `board:all` or an empty topic: `Choose a nonempty board topic; board:all is read-only`
-- `await` on a board send: `Board posts have no recipient to await; read voluntarily with hub list`
+- `await` on a board send: `Board posts have no recipient to await; read voluntarily with session_bus list`
 - `replyTo` on a board send: `Board posts do not support addressed replies`
 - `to` on a board list: `Board list uses from, not to`
 - Combining board ops with process/job params: `Board operations cannot target a process or job`
@@ -334,16 +331,15 @@ In the omp TUI, `/sessions` (or `/sessions list`) shows the live registry as a n
 
 Anything else prints `Usage: /sessions [list | send <session:address> <message>]`.
 
-## Native hub behavior left untouched (18.2.6 only)
+## Native tools are separate
 
-On omp 18.2.6, everything the native hub already did is delegated unchanged:
+`session_bus` implements only the cross-session operations. omp's native coordination tools keep their native behavior on every supported host:
 
-- `hub list` without a board address — native in-session IRC/subagent listing.
-- `hub send` with a `name` field (native process stdin injection) — native behavior, including its exec-level approval boundary.
-- `hub wait` bare, `hub jobs`, `hub ps`, `hub logs`, `hub start/stop/restart`, `hub describe`, `hub cancel`, `hub inbox` — all native, delegated as-is.
-- `to:all` stays **local to your own omp process** — it does not become a cross-session broadcast.
+- On omp 18.2.6, the native `hub` tool (in-session IRC/subagent listing, process stdin injection via `name`, bare `wait`, `jobs`, `ps`, `logs`, `start/stop/restart`, `describe`, `cancel`, `inbox`) behaves exactly as before — `session_bus` does not modify it.
+- On omp 18.12.6 there is no native `hub` tool; native `wait` and in-session IRC remain untouched.
+- Native `to:all` addressing stays **local to your own omp process** — `session_bus` does not turn it into a cross-session broadcast.
 
-On omp 18.12.6 there is no native hub; only the cross-session operations exist, and a bare `hub list` reports the native registry as unavailable on this version instead of substituting the cross-session list.
+Calling an operation `session_bus` does not implement (e.g. a bare `wait` without `from:session:…`, a `send` with a process `name`, a `list` without `from:board:…`) is rejected with `Use sessions/topics, send to session:/board:, wait from session:, or list from board:. Native tools are separate.` — it never falls through to native behavior.
 
 ## Limitations
 

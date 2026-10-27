@@ -4,7 +4,7 @@ omp-session-bus is a single omp extension with three cooperating parts:
 
 - [`transport.ts`](../transport.ts) — live-session registry and direct message delivery over Unix domain sockets.
 - [`board-store.ts`](../board-store.ts) — persistent, pull-only board posts as immutable JSON files.
-- `index.ts` — plugin wiring: on omp 18.2.6 it wraps omp's native `hub` tool (routing new addresses, delegating everything else); on omp 18.12.6 (no native hub) it registers a standalone `hub` tool with only the cross-session operations. See [Plugin wiring](#plugin-wiring).
+- `index.ts` — plugin wiring: registers the plugin's own `session_bus` tool in the extension factory (before any session starts) and wires session lifecycle, dispatch, and the `/sessions` command. See [Plugin wiring](#plugin-wiring).
 
 `board.ts` implements the board operations on top of `board-store.ts` and owns their help text.
 
@@ -46,7 +46,7 @@ reply    {"type":"info","ok":true,"info":{...PeerInfo}}
 - On `session_start` / `session_switch` / `session_branch`, the plugin stops any prior transport (generation counter guards races) and starts a fresh one; `session_shutdown` closes it.
 - `close()` is idempotent: it settles connections, closes the server, and unlinks **only its own** socket file.
 - A crashed session leaves a stale socket file behind. Peers never remove it; it disappears on reboot (the default directory is tmpfs or `/tmp`), or you can delete it manually. Discovery always skips it because nothing answers the probe — a stale socket degrades to an invisible no-op, never a misdirected message.
-- If the transport cannot start (e.g. unsafe directory), the session runs normally but direct session operations fail with `Session bus unavailable: <reason>`; the board uses a separate storage path and keeps working. The failure is surfaced once as a UI error notification, and native hub operations are unaffected.
+- If the transport cannot start (e.g. unsafe directory), the session runs normally but direct session operations fail with `Session bus unavailable: <reason>`; the board uses a separate storage path and keeps working. The failure is surfaced once as a UI error notification, and omp's native tools are unaffected.
 
 ## Board store: one immutable file per post
 
@@ -60,22 +60,13 @@ There is **no manifest, index, or lock** — the directory listing is the catalo
 
 ## Plugin wiring
 
-`index.ts` registers on session start, with two paths depending on the host:
+`index.ts` registers the plugin's own `session_bus` tool synchronously in the extension factory, before any session starts — this is what makes `--tools session_bus` launch filtering work on every supported host. The socket transport and TUI renderers are initialized later, at session start. There is a single code path on every host:
 
-### omp 18.2.6: wrap the native hub
-
-1. **Native hub guard.** It looks for the builtin `hub` tool. If `hub` belongs to another extension, it refuses to replace that wrapper and reports its source. If no `hub` exists, the standalone-hub path below applies instead.
-2. **Tool wrapper.** It re-registers `hub` with the native JSON schema plus new parameters (`op:sessions`, `op:topics`, `before`, `author`, `since`, `ttl`) and a description embedding the operation guides. In TUI mode it reuses omp's own hub renderers so cross-session calls render exactly like native ones.
-3. **Approval boundary.** `approval()` preserves native hub's per-op approval levels: `sessions`/`topics` are `read`; board sends are `write`; everything else falls through to the native classification (e.g. process-stdin sends stay `exec`).
-4. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; **anything else delegates to the native hub via `ctx.invokeTool`**, refusing to emulate it if delegation is unavailable.
-
-### omp 18.12.6: standalone hub
-
-There is no native hub on this host. The plugin registers its own `hub` tool exposing only the cross-session operations (`sessions`, `topics`, `send`/`wait`/`list` with explicit `session:`/`board:` addresses). A bare `hub list` (no board address) reports that the native registry is unavailable on this omp version — it never substitutes the cross-session list for native behavior. The tool registers at session start, so launching omp with `--tools hub` filtering would exclude it; the default toolset is fine.
-
-### Both hosts
-
-1. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first.
-2. **`/sessions` command.** Registry listing and manual send, surfaced both as a UI notification and an agent-visible message.
+1. **Tool registration.** The tool exposes exactly `sessions`, `send`, `wait`, `list`, and `topics`, with a description embedding the operation guides. It never wraps, replaces, or delegates to omp's native `hub`/`wait` tools; any operation outside the cross-session surface is rejected (`Use sessions/topics, send to session:/board:, wait from session:, or list from board:. Native tools are separate.`).
+2. **Approval boundary.** `approval()` classifies `send` to a `board:` address as `write`; every other operation is `read`.
+3. **Dispatch.** On execute: `op:sessions` → transport list; board addresses (`board:*` in `to`/`from`, or `op:topics`) → `executeBoard`; `send` to `session:` → direct send; `wait` from `session:` → cross-session wait; anything else is rejected.
+4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first.
+5. **`/sessions` command.** Registry listing and manual send, surfaced both as a UI notification and an agent-visible message.
+6. **Renderer reuse.** In TUI mode, `host-renderer.ts` reuses the host's native hub/wait tool renderers (`toolRenderers.hub`, falling back to `toolRenderers.wait`) so cross-session calls render like native IRC cards. This is an internal presentation detail, not a public API; the renderer loads lazily at session start and RPC/JSON modes work without it.
 
 Session identity: the transport address `session:<uuid>` is per-process and changes on restart; `PeerInfo.sessionId` carries the saved (persistent) omp session id for correlation across restarts.
