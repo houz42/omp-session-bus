@@ -10,5 +10,11 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "transport.ts", "*.test.ts", "*.d.ts"]
+  "include": [
+    "index.ts",
+    "transport.ts",
+    "*.test.ts",
+    "*.d.ts",
+    "tests/**/*.ts"
+  ]
 }
