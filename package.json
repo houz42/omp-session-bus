@@ -1,7 +1,7 @@
 {
   "name": "omp-session-bus",
-  "version": "0.2.0",
-  "description": "Cross-session messaging and topic-based public boards through omp's hub tool",
+  "version": "0.3.0",
+  "description": "Cross-session messaging and public boards through the standalone session_bus tool",
   "type": "module",
   "private": true,
   "omp": {

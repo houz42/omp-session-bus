@@ -4,10 +4,7 @@ omp-session-bus is a private plugin. Installation requires SSH read access to th
 
 ## Prerequisites
 
-- **omp 18.2.6 or 18.12.6.** These are the two supported hosts, and they behave differently:
-  - **18.2.6** (verified): the plugin wraps the builtin `hub` tool; native hub operations keep working. It refuses to replace another extension's wrapper; a host with no hub uses the standalone integration instead.
-  - **18.12.6** (tested: RPC sessions/topics, TUI topics + native IRC-card rendering, cross-version DM with an 18.2.6 peer; release acceptance pending): there is no native hub; the plugin registers its own `hub` tool exposing only the cross-session operations (`sessions`, `topics`, and `send`/`wait`/`list` with explicit `session:`/`board:` addresses). A bare `hub list` reports the native registry as unavailable — it does not substitute the cross-session list. **Do not launch omp with `--tools hub` filtering** on this version: the plugin registers `hub` at session start, and that filter excludes it. Default toolset is fine.
-  - Versions between 18.2.6 and 18.12.6 are unverified; no claim is made for other/latest omp versions.
+- **omp 18.2.6 or 18.12.6.** The plugin registers the same `session_bus` tool on both (verified on each), so `--tools session_bus` launch filtering works on either. On 18.2.6 omp's native `hub` tool keeps working unchanged alongside it; on 18.12.6 there is no native hub. Versions between 18.2.6 and 18.12.6 are unverified; no claim is made for other/latest omp versions.
 - **Node >= 22.18** for development and tests (see [CONTRIBUTING.md](../CONTRIBUTING.md)); the plugin itself runs inside the omp host.
 - **Linux or macOS.** Windows is not supported — the transport and board store rely on Unix domain sockets and POSIX permission bits.
 - **SSH access to the private repository.** Confirm before installing:
@@ -20,15 +17,13 @@ omp-session-bus is a private plugin. Installation requires SSH read access to th
 
 ## Install
 
-For the private readiness candidate (including omp 18.12.6 support), resolve
-`refs/heads/release/readiness`, not `main`:
+Resolve the commit you want on `main`:
 
 ```sh
-git ls-remote git@github.com:houz42/omp-session-bus.git refs/heads/release/readiness
+git ls-remote git@github.com:houz42/omp-session-bus.git refs/heads/main
 ```
 
-Copy that full SHA into the quoted install command below. The candidate is not
-promoted to `main` until owner acceptance.
+Copy that full SHA into the quoted install command below.
 
 ```sh
 omp plugin install 'git+ssh://git@github.com/houz42/omp-session-bus.git#<commit-sha>'
@@ -112,6 +107,6 @@ Then restart omp. Uninstall does not delete the storage directories; remove them
 
 ## Restart required
 
-The extension registers the `hub` tool wrapper and the `/sessions` command only when an omp session starts. After install, upgrade, link, uninstall, or configuration changes, **restart omp** for changes to take effect.
+The extension registers the `session_bus` tool in the extension factory at omp startup, and the `/sessions` command and socket transport when a session starts. After install, upgrade, link, uninstall, or configuration changes, **restart omp** for changes to take effect.
 
-On omp 18.12.6, also make sure you do **not** launch with `--tools hub` filtering — the plugin's `hub` is registered at session start, and that launch filter excludes it. The default toolset works unchanged.
+Because the tool registers before any session starts, launching omp with `--tools session_bus` works on both supported versions.

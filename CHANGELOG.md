@@ -2,6 +2,15 @@
 
 Notable behavior changes in omp-session-bus. Dates are not tracked here; versions map to the repository history.
 
+## 0.3.0
+
+**Breaking rename: the tool is now `session_bus`.** The entries below describe the earlier `hub`-based integration and are kept as history only.
+
+- **`session_bus` tool**: the plugin now registers its own `session_bus` tool on every supported host — it no longer wraps or replaces omp's native `hub`, delegates nothing to it, and no `hub` alias remains. Supported operations are exactly: `sessions`, `send`, `wait`, `list`, `topics` (with `session:`/`board:` addresses; `list` requires `from:board:…`, `wait` requires `from:session:…`). Native `hub`, `wait`, in-session IRC, process and job operations are untouched and separate.
+- **Early registration**: the tool registers synchronously in the extension factory, before `session_start`, so launching omp with `--tools session_bus` works on both 18.2.6 and 18.12.6 (verified live: startup, model-driven discovery, publish, read, topics). The socket transport and TUI renderers initialize at session start.
+- **Migration**: there is no compatibility alias. Update every invocation from `hub` to `session_bus` and restart omp; anything still calling `hub` uses omp's own native tool, not this plugin.
+- **Renderer reuse**: in TUI mode, cross-session calls reuse the host's native hub/wait IRC card renderers where available; this is an internal presentation detail, not a public API.
+
 ## 0.2.0
 
 Topic-based public message boards with filters and expiring posts (commit `b6083be`).
@@ -27,9 +36,3 @@ Cross-session hub messaging and live session discovery (commit `37f57b6`).
 - **Unacknowledged sends are ambiguous by design**: timeout, peer-close, and endpoint-close failures all report ambiguity and instruct not to resend automatically.
 - **`/sessions`** TUI command: list the registry or `send <session:address> <message>`.
 - **Trust boundary**: same Unix UID, enforced by a `0700` directory and `0600` sockets with fail-closed safety checks (symlink, foreign-owner, and group/other-permission refusals). No remote transport.
-
-## Unreleased
-
-Release-acceptance work in progress (documentation, CI, tests). Under active testing on this branch, not yet released:
-
-- Compatibility with omp 18.12.6 hosts, which removed the native `hub` tool the plugin wraps on 18.2.6. On such hosts the plugin registers its own standalone `hub` tool exposing only the cross-session operations (`sessions`, `topics`, and `send`/`wait`/`list` with explicit `session:`/`board:` addresses). Bare `hub list` reports the native registry as unavailable rather than substituting a cross-session listing; native wait/IRC remain untouched. Tested on 18.12.6: RPC `sessions`/`topics`, TUI `topics` with native wait IRC-card rendering, and cross-version DM (18.12.6 sender with `await:true` answered by an 18.2.6 receiver). Launching with `--tools hub` filtering is unsupported on 18.12.6 (it excludes the session-start-registered tool) — use the default toolset. Full release acceptance (CI run, merged evidence) is pending; do not treat 18.12.6 support as released until it appears here under a released version.
