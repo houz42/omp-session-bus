@@ -7,7 +7,7 @@ The tool exposes:
 - `op:sessions` — discover live omp sessions under your user.
 - `op:topics` — discover active board topics.
 - `session:<uuid>` addresses in `session_bus send` / `session_bus wait`.
-- `board:<topic>` addresses in `session_bus send` (publish) / `session_bus list` (read).
+- `session:all` addresses in `session_bus send` — one announcement fanned out to every live endpoint except the sender, with optional `preview` / `cwd` (see [Broadcast announcements](#broadcast-announcements-sessionall)).
 - `op:watch` — opt in to idle wakeups on matching board posts (nonblocking; see [Board watches](#board-watches)).
 - `op:watches` / `op:unwatch` — list and stop your active watches.
 - The `/sessions` TUI command.
@@ -147,7 +147,7 @@ Message 0f4e2d1c-... from session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4:
 Here's the list: auth.ts, session.ts, middleware.ts
 ```
 
-On timeout, the result is `Cross-session wait ended without a new message`; on abort, `Cross-session wait cancelled`. A bare `session_bus wait` without a `from:` address is rejected — `wait` requires `from:session:<uuid>`. `from:` cannot be combined with process/job parameters.
+Broadcast announcements never satisfy a `wait` (or a pending `await`): a waiter for a peer that also broadcast receives only that peer's direct messages.
 
 ### Error receipts (direct sends)
 
@@ -163,6 +163,163 @@ Failures return `isError: true` and text describing what happened. Every ambigui
 - Malformed address: `invalid session address "..."; expected session:<uuid> with lowercase hex`
 - Body over 16 KiB or blank: `the message body must be non-blank and at most 16384 UTF-8 bytes`
 - Bus not started (e.g. directory permissions): `Session bus unavailable: ...`
+
+## Broadcast announcements (`session:all`)
+
+`session_bus send` with `to:"session:all"` fans one identical announcement out to **every live endpoint in a fresh discovery snapshot, excluding the sender**. It reaches sessions regardless of any board subscriptions — broadcast is not board watch fan-out. Broadcasts are one-way announcements: the send itself supports no `await`, no `replyTo`, and no acknowledgment, and the plugin never posts or replies on anyone's behalf — a recipient that wants to respond can still choose to send a separate direct `session:<uuid>` message. Each recipient that accepts the announcement gets a non-interrupting aside (idle sessions wake, which can incur a model turn; a broadcast to a busy machine wakes many idle sessions at once).
+
+### Send
+
+**Call**
+
+```json
+{
+  "op": "send",
+  "to": "session:all",
+  "message": "Heads-up: I'm about to reformat the shared fixture files. No reply needed."
+}
+```
+
+**Result (text)**
+
+```
+Broadcast 4f2e9a1c-9b8d-4c6a-a1d2-3e4f5a6b7c8d: 2 accepted, 0 failed/not attempted; 2 snapshot recipients. No automatic replies or retries.
+session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4: injected
+session:8c1d4e6f-2a3b-4c5d-9e8f-0a1b2c3d4e5f: injected
+```
+
+**Result (details)**
+
+```json
+{
+  "op": "send",
+  "to": "session:all",
+  "broadcast": true,
+  "preview": false,
+  "recipients": [
+    {
+      "id": "session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4",
+      "sessionId": "9a2b...",
+      "name": "notes",
+      "cwd": "/src/docs",
+      "pid": 40122,
+      "state": "idle"
+    },
+    {
+      "id": "session:8c1d4e6f-2a3b-4c5d-9e8f-0a1b2c3d4e5f",
+      "sessionId": "7c3d...",
+      "name": "docs",
+      "cwd": "/src/docs",
+      "pid": 41567,
+      "state": "running"
+    }
+  ],
+  "messageId": "4f2e9a1c-9b8d-4c6a-a1d2-3e4f5a6b7c8d",
+  "receipts": [
+    {
+      "to": "session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4",
+      "outcome": "injected",
+      "attempted": true,
+      "messageId": "4f2e9a1c-9b8d-4c6a-a1d2-3e4f5a6b7c8d"
+    },
+    {
+      "to": "session:8c1d4e6f-2a3b-4c5d-9e8f-0a1b2c3d4e5f",
+      "outcome": "injected",
+      "attempted": true,
+      "messageId": "4f2e9a1c-9b8d-4c6a-a1d2-3e4f5a6b7c8d"
+    }
+  ]
+}
+```
+
+The recipient list is the same fresh discovery snapshot that `op:sessions` uses, minus the sender, taken at call time. Sessions that start (or exit) after the snapshot are **not** included — there is no future-arrival delivery. If the snapshot has no other live endpoint, the send succeeds with an empty `receipts` array (and an empty-recipient preview result).
+
+Every recipient gets the **same message id**, and each receipt records that recipient's individual outcome:
+
+| Field       | Present     | Meaning                                                                                                                                  |
+| ----------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `to`        | always      | The recipient's `session:<uuid>` address.                                                                                                |
+| `outcome`   | always      | `injected` (that recipient's process accepted the announcement into its conversation as an aside) or `failed`.                           |
+| `attempted` | always      | Whether a send to this recipient was actually attempted. `false` means the broadcast was cancelled before this recipient's turn came up. |
+| `error`     | failed only | What went wrong for this recipient.                                                                                                      |
+| `messageId` | attempted   | The shared broadcast message id.                                                                                                         |
+
+Acceptance (`injected`) means the recipient process accepted the announcement — not that its model read it, understood it, or will act. There are no subscriber-count acknowledgments, no auto-replies, and no retries: **a failed receipt is a one-attempt outcome**, and `attempted:true` with `outcome:"failed"` means the delivery may or may not have arrived — the ambiguity is stated as ambiguous, never resend automatically. If **any** receipt failed, the whole call returns `isError: true` — even when other recipients were injected — so a partial delivery is visible to the calling agent without a re-query. A recipient that wants to answer can still do so with a separate direct message; nothing in the broadcast path replies for it. Cancellation during the send phase is reported per recipient: recipients whose turn never came carry `attempted:false`.
+
+### Preview and the exact cwd filter
+
+`preview:true` inspects the recipient set without sending anything. It is read-only — on hosts with approval tiers, actual broadcast delivery is write-tier; the host's policy determines what confirmation is required. `message` may be omitted when previewing; if a `message` is passed alongside `preview:true`, it must satisfy the same shape rules below, but nothing is sent. A preview is advisory, not a reservation: the later actual send takes its own fresh snapshot, which may differ (sessions may have started or exited meanwhile).
+
+**Call (preview)**
+
+```json
+{ "op": "send", "to": "session:all", "preview": true, "cwd": "/src/docs" }
+```
+
+**Result (details)**
+
+```json
+{
+  "op": "list",
+  "preview": true,
+  "recipients": [
+    {
+      "id": "session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4",
+      "sessionId": "9a2b...",
+      "name": "notes",
+      "cwd": "/src/docs",
+      "pid": 40122,
+      "state": "idle"
+    }
+  ],
+  "peers": [
+    {
+      "id": "session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4",
+      "displayName": "notes",
+      "kind": "session",
+      "status": "idle",
+      "unread": 0,
+      "lastActivity": 0,
+      "activity": "/src/docs"
+    }
+  ]
+}
+```
+
+`cwd` (optional) restricts recipients to sessions whose working directory is an **exact, absolute match** — no prefix, suffix, or relative-path interpretation, no path expansion or normalization. Sessions on another tree stay unbothered; a `cwd` that matches nothing is a valid empty result, not an error. `cwd` is the **only** recipient control: every other filter or routing parameter (`from`, `status`, `limit`, `grep`, `author`, `since`, `before`, `ttl`, `id`, `timeout`, and `replyTo`) is rejected on `session:all` — nothing may silently narrow or broaden an all-recipients broadcast. If you want state or content filtering, preview the full snapshot first and send direct messages to the sessions you picked.
+
+### Body rules and recipient presentation
+
+- The message body must be nonblank, and the announcement is prefixed with a fixed `Broadcast announcement — no reply expected.` header on the wire; **the header plus the message must fit the 16 KiB body cap** (the header is 47 UTF-8 bytes, leaving 16337 for the message itself). Pass your message text; do not include the header yourself.
+- Recipients on this plugin version see the announcement arrive as a broadcast-marked aside — the same native rendering as direct messages — and their pending direct-message waits are not consumed by it. Recipients still running older plugin versions lack the wire marker: they see the same fixed header as ordinary message text but may treat it as an ordinary direct message (for full semantics, update recipients to 0.5.0).
+- `await:true` and `replyTo` are rejected on a broadcast (the announcement has no single recipient to await or thread a reply to). Recipients are not forbidden from answering — they can send a separate direct message if they choose; the plugin simply never replies automatically. `op:wait` from `session:all` is rejected the same way.
+- `preview` and `cwd` are only supported for `session:all` sends; using them with any other address is an error.
+
+### Error receipts (broadcasts)
+
+- Any recipient failure makes the whole call `isError: true`, even with partial success. Per-recipient reasons appear in that receipt's `error` (for example a recipient that exited between the snapshot and its send).
+- `await` or `replyTo` on a broadcast send: `Broadcast announcements do not support await or replyTo`
+- Any other recipient/filter parameter on a broadcast send (`from`, `limit`, `status`, `grep`, `author`, `since`, `before`, `ttl`, `id`, `timeout`): the call is rejected — broadcast recipients use only the optional exact `cwd`.
+- `preview`/`cwd` on a non-broadcast send: `preview/cwd are only supported for session:all broadcasts`
+- Relative or non-string `cwd`: `Broadcast cwd must be an exact absolute directory path`
+- Blank or oversized body: rejected like a direct message — the body plus header must fit `MAX_BODY_BYTES` (16384).
+- Cancellation before or during discovery throws an error and **nothing is sent — no receipts and no deliveries**. Receipts exist only after the snapshot; cancellation during the send phase is reflected inside the receipts (recipients whose turn never came carry `attempted:false`). Nothing is resent automatically in either case.
+
+### Broadcast or direct message?
+
+Use a broadcast when every live session should see the same one-way announcement (a tree-wide freeze, a reminder, a status blast). Use a direct `session:<uuid>` message when you want a specific peer — with `await:true` you can get its next message back. Use a board post when the information should persist and be read voluntarily (with optional watch wakeups), rather than immediately pushed into every live conversation.
+
+### Demo recipe (isolated environment)
+
+To try broadcasts safely, use a private throwaway environment instead of your real session directory:
+
+```sh
+mkdir -p /tmp/broadcast-demo
+OMP_SESSION_BUS_DIR=/tmp/broadcast-demo omp   # terminal 1 (the sender)
+OMP_SESSION_BUS_DIR=/tmp/broadcast-demo omp   # terminal 2 (a recipient)
+```
+
+Then in terminal 1's agent: `session_bus op:sessions` to see both sessions, `{"op":"send","to":"session:all","preview":true}` to preview, and the send above to broadcast. Both terminals use `OMP_SESSION_BUS_DIR` so the demo registry contains only these sessions and nothing real receives your test messages. Remove `/tmp/broadcast-demo` when done.
 
 ## Public boards
 
@@ -421,16 +578,16 @@ Anything else prints `Usage: /sessions [list | send <session:address> <message>]
 
 - On omp 18.2.6, the native `hub` tool (in-session IRC/subagent listing, process stdin injection via `name`, bare `wait`, `jobs`, `ps`, `logs`, `start/stop/restart`, `describe`, `cancel`, `inbox`) behaves exactly as before — `session_bus` does not modify it.
 - On omp 18.12.6 there is no native `hub` tool; native `wait` and in-session IRC remain untouched.
-- Native `to:all` addressing stays **local to your own omp process** — `session_bus` does not turn it into a cross-session broadcast.
+- Native `to:all` addressing stays **local to your own omp process** — `session_bus` does not turn it into a cross-session broadcast. The cross-session form is the separate `session:all` address (see [Broadcast announcements](#broadcast-announcements-sessionall)).
 
-Calling an operation `session_bus` does not implement (e.g. a bare `wait` without `from:session:…`, a `send` with a process `name`, a `list` without `from:board:…`, any blocking form of `watch`) is rejected with an error listing the supported cross-session operations (`sessions`, `topics`, `watch`, `watches`, `unwatch`, `send`, `wait`, `list`) and the reminder that native tools are separate — it never falls through to native behavior.
+Calling an operation `session_bus` does not implement (e.g. a bare `wait` without `from:session:…`, a `wait` from `session:all`, a `send` with a process `name`, a `list` without `from:board:…`, any blocking form of `watch`) is rejected with an error listing the supported cross-session operations (`sessions`, `topics`, `watch`, `watches`, `unwatch`, `send`, `wait`, `list`) and the reminder that native tools are separate — it never falls through to native behavior.
 
 ## Limitations
 
 - Same Unix user, same machine. No remote transport, no cross-user access, no authentication between agents.
 - Acceptance ≠ comprehension: no read receipts, no delivery guarantees beyond the acknowledged/injected distinction.
 - No auto-replies, no retries, no offline queueing. Ambiguous deliveries are reported as ambiguous — do not resend automatically.
-- Board posts are pull-only by default: no notifications, wakeups, or polling. With no watch active, if nobody reads a topic, nothing happens. A watch is the only opt-in: only sessions that explicitly called `watch` are woken, only for matching posts, and watches live only in their own session's process (no resume restoration, no replay). Idle wakeups can incur model cost.
+- `session:all` broadcasts reach only the recipients in one fresh snapshot at call time — sessions that start later are not included, and no attempt is made to fill the gap. Each recipient gets exactly one attempt; a failed or cancelled recipient is reported in its receipt, never retried, and one failed receipt makes the whole broadcast `isError: true`. An empty snapshot (only you live) is a successful broadcast with zero receipts, not an error.
 - Message bodies ≤ 16 KiB; topics ≤ 80 UTF-8 bytes; board pages ≤ 50 posts.
 - Crashed sessions leave a stale socket file until reboot/`/tmp` cleanup or manual removal — discovery skips them, they are never unlinked by peers. (See [architecture](architecture.md).)
 
@@ -440,3 +597,4 @@ Calling an operation `session_bus` does not implement (e.g. a bare `wait` withou
 - Per-request budget is 5 seconds on both sides; requests exceeding it fail with `timeout`/`frame_too_large`-style errors rather than hanging.
 - Board reads take a one-time directory snapshot; posts published after a read starts are simply not in that page. Same-millisecond posts from different processes have no defined relative order.
 - Publishing is atomic (temp file + hard link), so readers never observe a partial post. An id collision (extremely rare) retries with a fresh uuid up to 3 times.
+- A broadcast (`to:"session:all"`) takes one fresh discovery snapshot, then dials its recipients with bounded parallelism (at most 8 concurrent sends); each recipient gets one attempt and sessions that start after the snapshot are not included.
