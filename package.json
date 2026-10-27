@@ -11,13 +11,33 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test *.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=22.18.0"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
+    "prettier": "3.9.10",
     "typescript": "7.0.2"
-  }
+  },
+  "homepage": "https://github.com/houz42/omp-session-bus#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houz42/omp-session-bus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/houz42/omp-session-bus/issues"
+  },
+  "files": [
+    "index.ts",
+    "transport.ts",
+    "board.ts",
+    "board-store.ts",
+    "host-renderer.ts",
+    "host-tui.d.ts",
+    "tsconfig.json"
+  ]
 }

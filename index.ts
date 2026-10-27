@@ -130,6 +130,7 @@ type Waiter = {
 export default function sessionBus(pi: API): void {
   let transport: SessionTransport | undefined;
   let installed = false;
+  let installing: Promise<void> | undefined;
   let generation = 0;
   let unavailable = "Session bus has not started";
   const waiters = new Set<Waiter>();
@@ -239,9 +240,9 @@ export default function sessionBus(pi: API): void {
   async function installHub(mode: Context["mode"]): Promise<void> {
     if (installed) return;
     const native = pi.getAllTools().find((tool) => tool.name === "hub");
-    if (!native || native.sourceInfo.source !== "builtin")
+    if (native && native.sourceInfo.source !== "builtin")
       throw new Error(
-        "Session bus requires the native hub tool; refusing to replace another plugin's wrapper",
+        `The hub tool is already supplied by ${native.sourceInfo.source}; refusing to replace another extension's wrapper. Disable the conflicting wrapper before loading omp-session-bus.`,
       );
     // TUI modules exist only inside the omp host, not standalone Node transport tests.
     // Keep the host-only static export behind the TUI runtime boundary.
@@ -249,7 +250,22 @@ export default function sessionBus(pi: API): void {
       mode === "tui"
         ? (await import("./host-renderer.ts")).hubToolRenderer
         : undefined;
-    const schema = native.parameters;
+    const schema = native?.parameters ?? {
+      type: "object",
+      required: ["op"],
+      additionalProperties: false,
+      properties: {
+        to: { type: "string" },
+        from: { type: "string" },
+        message: { type: "string" },
+        replyTo: { type: "string" },
+        await: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        status: { type: "string", enum: ["running", "idle", "parked"] },
+        grep: { type: "string" },
+        timeout: { type: "number", exclusiveMinimum: 0 },
+      },
+    };
     const jsonSchema =
       schema &&
       (typeof schema === "object" || typeof schema === "function") &&
@@ -274,22 +290,24 @@ export default function sessionBus(pi: API): void {
         properties: {
           ...properties,
           op: {
-            enum: [
-              "send",
-              "wait",
-              "inbox",
-              "list",
-              "jobs",
-              "cancel",
-              "start",
-              "ps",
-              "logs",
-              "stop",
-              "restart",
-              "describe",
-              "topics",
-              "sessions",
-            ],
+            enum: native
+              ? [
+                  "send",
+                  "wait",
+                  "inbox",
+                  "list",
+                  "jobs",
+                  "cancel",
+                  "start",
+                  "ps",
+                  "logs",
+                  "stop",
+                  "restart",
+                  "describe",
+                  "topics",
+                  "sessions",
+                ]
+              : ["send", "wait", "list", "topics", "sessions"],
             type: "string",
             description:
               "hub operation; topics discovers board topics; sessions discovers cross-session peers",
@@ -316,7 +334,7 @@ export default function sessionBus(pi: API): void {
           },
         },
       },
-      description: `${native.description}\n\n# Cross-session messaging\n${HELP}\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}`,
+      description: `${native?.description ?? "Plugin-owned cross-session messaging and public board. This host has no native hub: only explicitly addressed session:/board: operations, sessions, and topics are supported. Native wait, IRC, job, and process controls remain untouched."}\n\n# Cross-session messaging\n${HELP}\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}`,
       loadMode: "essential",
       strict: true,
       approval,
@@ -325,6 +343,22 @@ export default function sessionBus(pi: API): void {
         (params.op === "logs" && params.follow === true),
       async execute(_id, params, signal, onUpdate, ctx) {
         try {
+          if (
+            !native &&
+            !(
+              params.op === "sessions" ||
+              params.op === "topics" ||
+              isRemote(params.to) ||
+              isRemote(params.from) ||
+              [params.to, params.from].some(
+                (value) =>
+                  typeof value === "string" && value.startsWith("board:"),
+              )
+            )
+          )
+            throw new Error(
+              "This host has no native hub operations. Use op:sessions for session discovery, op:topics for board topics, or explicit session:/board: addresses. Use the host's native tools for in-session coordination.",
+            );
           if (params.op === "sessions") {
             const peers = (await requireTransport().list(signal)).filter(
               (peer) => !params.status || peer.state === params.status,
@@ -380,7 +414,7 @@ export default function sessionBus(pi: API): void {
                 (peer) => peer.id === params.from && peer.id !== bus.id,
               )
             )
-              throw new Error("Target session is not live; use hub list");
+              throw new Error("Target session is not live; use hub sessions");
             const seconds =
               params.timeout === undefined ? 30 : Number(params.timeout);
             if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 300)
@@ -426,7 +460,12 @@ export default function sessionBus(pi: API): void {
     if (generation !== epoch) return;
     const sessionId = ctx.sessionManager.getSessionId();
     try {
-      await installHub(ctx.mode);
+      installing ??= installHub(ctx.mode).catch((error) => {
+        installing = undefined;
+        throw error;
+      });
+      await installing;
+      if (generation !== epoch) return;
       const started = await SessionTransport.start({
         info: () => ({
           sessionId,
@@ -447,6 +486,7 @@ export default function sessionBus(pi: API): void {
       if (generation !== epoch) await started.close();
       else transport = started;
     } catch (error) {
+      if (generation !== epoch) return;
       unavailable = `Session bus unavailable: ${errorText(error)}`;
       ctx.ui.notify(unavailable, "error");
     }

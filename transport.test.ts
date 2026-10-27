@@ -61,7 +61,12 @@ function peerOptions(
 
 /** Fresh per-test bus directory; every started transport is closed after. */
 function makeWorld(t: test.TestContext, label: string) {
-  const dir = mkdtempSync(path.join(tmpdir(), `omp-session-bus-${label}-`));
+  const dir = mkdtempSync(
+    path.join(
+      process.platform === "darwin" ? "/tmp" : tmpdir(),
+      `omp-session-bus-${label}-`,
+    ),
+  );
   const started: SessionTransport[] = [];
   const spawn = async (name: string, box = new Mailbox()) => {
     const transport = await SessionTransport.start(
@@ -301,5 +306,14 @@ test("start rejects unsafe directories", async (t) => {
   );
   await assert.rejects(
     SessionTransport.start(peerOptions(link, "linked", noop.receive)),
+  );
+});
+
+test("oversized socket paths fail clearly without binding a truncated endpoint", async (t) => {
+  const { dir } = makeWorld(t, "path-limit");
+  const longDirectory = path.join(dir, "x".repeat(110));
+  await assert.rejects(
+    SessionTransport.start(peerOptions(longDirectory, "long", () => {})),
+    /OMP_SESSION_BUS_DIR/,
   );
 });
