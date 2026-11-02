@@ -9,6 +9,16 @@ When two or more omp sessions run side by side under the same Unix user, they ar
 
 The plugin owns the `session_bus` tool on every supported host. Registration happens synchronously in the extension factory, before any session starts, so launching omp with `--tools session_bus` works on both supported versions. The socket transport and TUI renderers are initialized when a session starts. omp's own coordination tools (native `hub`, `wait`, in-session IRC, processes, jobs) are untouched — `session_bus` never wraps, replaces, or delegates to them.
 
+## In action
+
+Two real sessions coordinating over the bus. The sender discovers live peers and delivers a message to the receiver's `session:<uuid>` address:
+
+![Sender session delivering a cross-session message](docs/assets/demo-sender.png)
+
+The receiver wakes on the incoming aside, reads the referenced `board:ttl-lease` post through the bus, and confirms back to the sender — no keystrokes injected, no polling:
+
+![Receiver session acting on the incoming message](docs/assets/demo-receiver.png)
+
 ## Use cases
 
 - **Ask a peer who has context.** Session A is deep in a refactor; session B just solved a related failure. `session_bus op:sessions` finds B; `session_bus send` asks it to paste the fix.
