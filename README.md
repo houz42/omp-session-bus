@@ -11,13 +11,13 @@ The plugin owns the `session_bus` tool on every supported host. Registration hap
 
 ## In action
 
-Two real sessions coordinating over the bus. The sender discovers live peers and delivers a message to the receiver's `session:<uuid>` address:
+A scripted demo between two sessions, `alpha` and `beta`. The sender posts a note to `board:demo-release`, delivers a DM to the receiver's `session:<uuid>` address, and later receives the receiver's ACK:
 
-![Sender session delivering a cross-session message](docs/assets/demo-sender.png)
+![Sender session posting to a board and messaging a peer](docs/assets/demo-sender.png)
 
-The receiver wakes on the incoming aside, reads the referenced `board:ttl-lease` post through the bus, and confirms back to the sender — no keystrokes injected, no polling:
+The receiver wakes on the incoming aside and replies over the bus — no keystrokes injected, no polling:
 
-![Receiver session acting on the incoming message](docs/assets/demo-receiver.png)
+![Receiver session acknowledging the incoming message](docs/assets/demo-receiver.png)
 
 ## Use cases
 
