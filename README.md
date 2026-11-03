@@ -52,7 +52,7 @@ Notes:
 ## Install
 
 ```sh
-omp plugin install 'git+ssh://git@github.com/houz42/omp-session-bus.git#<commit-sha>'
+omp plugin install 'https://github.com/houz42/omp-session-bus.git#<commit-sha>'
 ```
 
 Resolve `<commit-sha>` from `main` (see [installation](docs/installation.md)). Then **restart omp** — the extension loads when a session starts.
@@ -93,4 +93,4 @@ For manual discovery in the omp composer, type `/sessions`.
 
 ## Status
 
-Private repository. The `session_bus` rename shipped as **0.3.0**; opt-in board watches ship as **0.4.0**; `session:all` broadcast announcements ship as **0.5.0** — each via CI on `main`. The repository stays private with no public release, publication, or license grant until the owner separately approves it (see [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and [release readiness](docs/release-readiness.md)).
+MIT-licensed (see [LICENSE](LICENSE)). The `session_bus` rename shipped as **0.3.0**; opt-in board watches ship as **0.4.0**; `session:all` broadcast announcements ship as **0.5.0** — each via CI on `main` (see [CHANGELOG.md](CHANGELOG.md) and [release readiness](docs/release-readiness.md)).

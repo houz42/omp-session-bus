@@ -1,32 +1,25 @@
 # Installation
 
-omp-session-bus is a private plugin. Installation requires SSH read access to the private GitHub repository, and the install command pins an exact commit so every machine runs identical code.
+omp-session-bus installs from GitHub over HTTPS, and the install command pins an exact commit so every machine runs identical code.
 
 ## Prerequisites
 
 - **omp 18.2.6 or 18.12.6.** The plugin registers the same `session_bus` tool on both (verified on each), so `--tools session_bus` launch filtering works on either. On 18.2.6 omp's native `hub` tool keeps working unchanged alongside it; on 18.12.6 there is no native hub. Versions between 18.2.6 and 18.12.6 are unverified; no claim is made for other/latest omp versions.
 - **Node >= 22.18** for development and tests (see [CONTRIBUTING.md](../CONTRIBUTING.md)); the plugin itself runs inside the omp host.
 - **Linux or macOS.** Windows is not supported — the transport and board store rely on Unix domain sockets and POSIX permission bits.
-- **SSH access to the private repository.** Confirm before installing:
-
-  ```sh
-  git ls-remote git@github.com:houz42/omp-session-bus.git HEAD
-  ```
-
-  If this hangs or fails, fix your GitHub SSH keys (and any VPN/proxy needed to reach github.com) before continuing — `omp plugin install` uses the same SSH transport.
 
 ## Install
 
 Resolve the commit you want on `main`:
 
 ```sh
-git ls-remote git@github.com:houz42/omp-session-bus.git refs/heads/main
+git ls-remote https://github.com/houz42/omp-session-bus.git refs/heads/main
 ```
 
 Copy that full SHA into the quoted install command below.
 
 ```sh
-omp plugin install 'git+ssh://git@github.com/houz42/omp-session-bus.git#<commit-sha>'
+omp plugin install 'https://github.com/houz42/omp-session-bus.git#<commit-sha>'
 ```
 
 - `<commit-sha>` is the full commit hash to install (e.g. the `main` tip, below). Always pin a commit; a floating branch reference will silently drift.
@@ -34,7 +27,7 @@ omp plugin install 'git+ssh://git@github.com/houz42/omp-session-bus.git#<commit-
 
 ### Why the commit is pinned — Bun lock caching
 
-omp installs plugins with Bun, which caches git dependencies aggressively: after the first install of a `git+ssh://...` URL, reinstalling the _same URL_ (no `#sha`) can silently keep the cached commit even after `main` moved. Pinning `#<commit-sha>` forces a concrete tree every time. Consequences:
+omp installs plugins with Bun, which caches git dependencies aggressively: after the first install of a `https://...` URL, reinstalling the _same URL_ (no `#sha`) can silently keep the cached commit even after `main` moved. Pinning `#<commit-sha>` forces a concrete tree every time. Consequences:
 
 - **New installs** are always exact: the SHA is in the URL.
 - **Upgrades** need a fresh SHA (next section) — bumping the pin is what defeats the cache.
@@ -55,7 +48,7 @@ Upgrades are re-pins, not pulls:
 2. Reinstall with the new SHA:
 
    ```sh
-   omp plugin install 'git+ssh://git@github.com/houz42/omp-session-bus.git#<new-commit-sha>'
+   omp plugin install 'https://github.com/houz42/omp-session-bus.git#<new-commit-sha>'
    ```
 
 3. Restart omp. Sessions only load the extension at startup.
