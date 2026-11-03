@@ -11,13 +11,13 @@ The plugin owns the `session_bus` tool on every supported host. Registration hap
 
 ## In action
 
-A scripted demo between two sessions, `alpha` and `beta`. The sender posts a note to `board:demo-release`, delivers a DM to the receiver's `session:<uuid>` address, and later receives the receiver's ACK:
+A scripted demo between two sessions, `alpha` and `beta`. The sender delivers a DM with `session_bus send`; the bus returns the native result card with the receiver's acceptance and message id:
 
-![Sender session posting to a board and messaging a peer](docs/assets/demo-sender.png)
+![Sender session_bus send with acceptance card](docs/assets/demo-sender.png)
 
-The receiver wakes on the incoming aside and replies over the bus — no keystrokes injected, no polling:
+On the receiver, the message lands as the native `irc:incoming` card — sender address, timestamp, body — and the idle session wakes on it. No keystrokes injected, no polling:
 
-![Receiver session acknowledging the incoming message](docs/assets/demo-receiver.png)
+![Receiver's native incoming IRC card](docs/assets/demo-receiver.png)
 
 ## Use cases
 
