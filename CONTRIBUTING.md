@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions happen from a git worktree of this private repository; keep the repo private, no release/publication workflow, and no public visibility changes.
+Contributions happen from a git worktree of this repository. The code is MIT-licensed (see [LICENSE](LICENSE)); by contributing you agree your contributions are under the same license. The repository currently stays private with no release/publication workflow — visibility changes are the owner's call.
 
 ## Development setup
 

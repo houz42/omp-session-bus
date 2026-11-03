@@ -51,4 +51,4 @@ CI status for the exact candidate commit is authoritative for the supported Node
 
 - The `hub` → `session_bus` rename is a **breaking change with no compatibility alias**; agents must switch every invocation to `session_bus` and restart omp.
 - Opt-in board watches merged to `main` as **0.4.0**. `session:all` broadcast announcements are the current change and merge to `main` as **0.5.0** once CI is green on the candidate commit; until then it is not a release and no test or CI claims for 0.5.0 are made here ahead of that run.
-- Keep the repository private: no public release, npm publication, license grant, or visibility change without explicit owner approval. Choose a license before any public distribution; none is implied.
+- The code is MIT-licensed (see [LICENSE](../LICENSE)). The repository stays private until the owner flips visibility; no npm publication without explicit owner approval.
