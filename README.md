@@ -52,10 +52,10 @@ Notes:
 ## Install
 
 ```sh
-omp plugin install 'https://github.com/houz42/omp-session-bus.git#<commit-sha>'
+omp plugin install 'https://github.com/houz42/omp-session-bus.git'
 ```
 
-Resolve `<commit-sha>` from `main` (see [installation](docs/installation.md)). Then **restart omp** — the extension loads when a session starts.
+Then **restart omp** — the extension loads when a session starts. For upgrades, see [installation](docs/installation.md) (reinstalls need a pinned `#<commit-sha>` to defeat Bun's git cache).
 
 ## Quick start
 

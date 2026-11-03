@@ -10,26 +10,17 @@ omp-session-bus installs from GitHub over HTTPS, and the install command pins an
 
 ## Install
 
-Resolve the commit you want on `main`:
-
 ```sh
-git ls-remote https://github.com/houz42/omp-session-bus.git refs/heads/main
+omp plugin install 'https://github.com/houz42/omp-session-bus.git'
 ```
 
-Copy that full SHA into the quoted install command below.
-
-```sh
-omp plugin install 'https://github.com/houz42/omp-session-bus.git#<commit-sha>'
-```
-
-- `<commit-sha>` is the full commit hash to install (e.g. the `main` tip, below). Always pin a commit; a floating branch reference will silently drift.
 - The default scope is `user`, which installs into omp's per-user plugin directory — every omp session you start gets the extension.
 
-### Why the commit is pinned — Bun lock caching
+### Why upgrades pin a commit — Bun lock caching
 
-omp installs plugins with Bun, which caches git dependencies aggressively: after the first install of a `https://...` URL, reinstalling the _same URL_ (no `#sha`) can silently keep the cached commit even after `main` moved. Pinning `#<commit-sha>` forces a concrete tree every time. Consequences:
+omp installs plugins with Bun, which caches git dependencies aggressively: reinstalling the _same URL_ can silently keep the cached commit even after `main` moved. Pinning `#<commit-sha>` forces a concrete tree. Consequences:
 
-- **New installs** are always exact: the SHA is in the URL.
+- **First install** needs nothing special — the bare URL above resolves `main` once.
 - **Upgrades** need a fresh SHA (next section) — bumping the pin is what defeats the cache.
 - **Uninstall then reinstall** is the fallback if you suspect a stale cache (last section).
 
@@ -40,7 +31,7 @@ Upgrades are re-pins, not pulls:
 1. Resolve the commit you want on `main`:
 
    ```sh
-   git ls-remote git@github.com:houz42/omp-session-bus.git refs/heads/main
+   git ls-remote https://github.com/houz42/omp-session-bus.git refs/heads/main
    ```
 
    This prints the current `main` SHA without cloning.
@@ -58,7 +49,7 @@ Upgrades are re-pins, not pulls:
 To work on the plugin from a checkout:
 
 ```sh
-git clone git@github.com:houz42/omp-session-bus.git
+git clone https://github.com/houz42/omp-session-bus.git
 cd omp-session-bus
 bun install            # installs dev dependencies (@types/node, typescript)
 ```
