@@ -93,4 +93,4 @@ For manual discovery in the omp composer, type `/sessions`.
 
 ## Status
 
-MIT-licensed (see [LICENSE](LICENSE)). The `session_bus` rename shipped as **0.3.0**; opt-in board watches ship as **0.4.0**; `session:all` broadcast announcements ship as **0.5.0** — each via CI on `main` (see [CHANGELOG.md](CHANGELOG.md) and [release readiness](docs/release-readiness.md)).
+MIT-licensed (see [LICENSE](LICENSE)). See [CHANGELOG.md](CHANGELOG.md) for releases: standalone `session_bus`, opt-in board watches, broadcasts, and send-time sender titles with display-only IRC header clipping. No npm publication.

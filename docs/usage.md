@@ -85,6 +85,17 @@ Cross-session agent message 5c1f2e3d-... from session:6f9a4c1e-....
 What did you conclude about the auth refactor? ...
 ```
 
+Messages include a send-time `senderTitle` when the sender supports it. The native
+IRC header displays `Title · session:<uuid>` and clips the end with an ellipsis
+only when the rendered line exceeds the available width. A long title is capped
+for display so it cannot consume the entire header. The full sender title remains
+in metadata and model context, even after the sender renames or exits.
+
+Always reply using the **complete** `session:<uuid>` in message context or
+`details.senderAddress`, never a clipped header or the title. Awaited replies
+retain the full address in `details.waited.from`. Titles may duplicate and are
+not proof of identity. Older peers without title metadata display their address.
+
 ### Send with await
 
 `await: true` keeps the send open for up to **120 seconds** waiting for the next message from that peer — the _next_ one, not necessarily an answer to what you sent, matching native IRC semantics.

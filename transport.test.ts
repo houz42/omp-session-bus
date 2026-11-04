@@ -317,3 +317,59 @@ test("oversized socket paths fail clearly without binding a truncated endpoint",
     /OMP_SESSION_BUS_DIR/,
   );
 });
+
+test("send captures the current title without changing the sender address", async (t) => {
+  const { dir, spawn, started } = makeWorld(t, "title");
+  let title = "Original title";
+  const sender = await SessionTransport.start({
+    directory: dir,
+    info: () => ({
+      sessionId: "sender",
+      name: title,
+      cwd: "/work",
+      pid: process.pid,
+      state: "idle",
+    }),
+    receive: () => {},
+  });
+  started.push(sender);
+  const receiver = await spawn("receiver");
+  const first = await sender.send(receiver.transport.id, "first");
+  title = "Renamed title";
+  const second = await sender.send(receiver.transport.id, "second", {
+    broadcast: true,
+  });
+  assert.equal(first.senderTitle, "Original title");
+  assert.equal(second.senderTitle, "Renamed title");
+  assert.equal(first.from, sender.id);
+  assert.equal(second.from, sender.id);
+  assert.deepEqual(receiver.box.log, [first, second]);
+});
+
+test("old envelopes without titles are accepted; invalid title metadata is rejected", async (t) => {
+  const { spawn } = makeWorld(t, "metadata");
+  const sender = await spawn("sender");
+  const receiver = await spawn("receiver");
+  const envelope = {
+    id: "old-peer",
+    from: sender.transport.id,
+    to: receiver.transport.id,
+    body: "Legacy message",
+    ts: Date.now(),
+  };
+  const replies = await exchangeRawLine(
+    socketPath(receiver.transport),
+    JSON.stringify({ type: "send", message: envelope }) + "\n",
+  );
+  assert.equal(JSON.parse(replies[0]).ok, true);
+  assert.deepEqual(receiver.box.log[0], envelope);
+  for (const senderTitle of [42, "x".repeat(4097)]) {
+    const rejected = await exchangeRawLine(
+      socketPath(receiver.transport),
+      JSON.stringify({ type: "send", message: { ...envelope, senderTitle } }) +
+        "\n",
+    );
+    assert.equal(JSON.parse(rejected[0]).ok, false);
+  }
+  assert.equal(receiver.box.log.length, 1);
+});

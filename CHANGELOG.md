@@ -2,6 +2,12 @@
 
 Notable behavior changes in omp-session-bus. Dates are not tracked here; versions map to the repository history.
 
+## 0.6.0
+
+- Cross-session direct messages, broadcasts, and awaited replies include the sender's title captured at send time. Titles are display labels, never routing keys or authenticated identities.
+- Native IRC headers show the title before the sender address and retain the host's width-aware ellipsis. Long titles are bounded to leave room for the UUID; terminal control sequences are removed from display labels.
+- Full sender addresses and titles remain in envelopes/model context. Incoming cards expose the full reply address separately as `senderAddress`; UI clipping never changes routing. Peers without title metadata fall back to the address.
+
 ## 0.5.0
 
 `session:all` broadcast announcements: one message fanned out to every live same-user endpoint except the sender.
