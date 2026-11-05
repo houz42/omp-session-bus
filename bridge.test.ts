@@ -115,6 +115,7 @@ test("await accepts the next peer message without replyTo; later messages inject
     );
     assert.equal(view?.label, "Sent");
     assert.equal(view?.status, "success");
+    assert.equal(view?.target, `peer · ${peer.id}`);
     assert.ok(
       view?.waited && typeof view.waited === "object" && "body" in view.waited,
     );

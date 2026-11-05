@@ -262,6 +262,7 @@ export default function sessionBus(pi: API): void {
         to: message.to,
         outcome: "injected",
         messageId: message.id,
+        recipientTitle: message.recipientTitle,
       };
       if (!pending)
         return textResult(

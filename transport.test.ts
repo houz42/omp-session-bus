@@ -167,13 +167,17 @@ test("send delivers to the live peer; replies flow back with replyTo", async (t)
   assert.equal(sent.to, b.transport.id);
   assert.equal(sent.body, "ping");
   assert.ok(Number.isFinite(sent.ts));
-  assert.deepEqual(await b.box.next(), sent);
+  const { recipientTitle, ...sentEnvelope } = sent;
+  assert.equal(recipientTitle, "bravo");
+  assert.deepEqual(await b.box.next(), sentEnvelope);
 
   const reply = await b.transport.send(a.transport.id, "pong", {
     replyTo: "msg-1",
   });
   assert.equal(reply.replyTo, "msg-1");
-  assert.deepEqual(await a.box.next(), reply);
+  const { recipientTitle: replyTarget, ...replyEnvelope } = reply;
+  assert.equal(replyTarget, "alpha");
+  assert.deepEqual(await a.box.next(), replyEnvelope);
 });
 
 test("a rejecting receive callback rejects send; the peer then recovers", async (t) => {
@@ -343,7 +347,13 @@ test("send captures the current title without changing the sender address", asyn
   assert.equal(second.senderTitle, "Renamed title");
   assert.equal(first.from, sender.id);
   assert.equal(second.from, sender.id);
-  assert.deepEqual(receiver.box.log, [first, second]);
+  assert.deepEqual(
+    receiver.box.log,
+    [first, second].map(({ recipientTitle, ...envelope }) => {
+      assert.equal(recipientTitle, "receiver");
+      return envelope;
+    }),
+  );
 });
 
 test("old envelopes without titles are accepted; invalid title metadata is rejected", async (t) => {

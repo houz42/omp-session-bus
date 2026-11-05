@@ -668,7 +668,7 @@ export class SessionTransport {
     to: string,
     body: string,
     options?: SendOptions,
-  ): Promise<Envelope> {
+  ): Promise<Envelope & { recipientTitle?: string }> {
     if (this.#closed) throw new Error("the session bus endpoint is closed");
     if (
       options !== undefined &&
@@ -757,7 +757,9 @@ export class SessionTransport {
       typeof reply.id === "string" &&
       reply.id === id
     ) {
-      return envelope;
+      return isBoundedString(reply.recipientTitle)
+        ? { ...envelope, recipientTitle: reply.recipientTitle }
+        : envelope;
     }
     if (
       isRecord(reply) &&
@@ -937,7 +939,15 @@ export class SessionTransport {
               `the receive callback did not settle within ${remaining} ms`,
             ),
         );
-        respond({ type: "ack", ok: true, id: envelope.id });
+        // Optional presentation metadata must never turn accepted delivery into failure.
+        let recipientTitle: string | undefined;
+        try {
+          const name = this.#info().name;
+          if (isBoundedString(name)) recipientTitle = name;
+        } catch {
+          // Keep the ACK valid even if the display-name callback fails.
+        }
+        respond({ type: "ack", ok: true, id: envelope.id, recipientTitle });
         return;
       }
       respond(

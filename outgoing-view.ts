@@ -1,3 +1,5 @@
+import { senderLabel } from "./sender-display.ts";
+
 export type BusRenderResult = {
   content: Array<{ type: "text"; text: string }>;
   details?: unknown;
@@ -19,7 +21,7 @@ export function outgoingView(
   result?: BusRenderResult,
 ): OutgoingView | undefined {
   if (args?.op !== "send" || args.preview === true) return undefined;
-  const target = typeof args.to === "string" ? args.to : "…";
+  let target = typeof args.to === "string" ? args.to : "…";
   const body = typeof args.message === "string" ? args.message : "";
   if (!result)
     return { label: "Sending", target, status: "pending", summary: "", body };
@@ -36,6 +38,12 @@ export function outgoingView(
       continue;
     if (receipt.outcome === "injected") accepted++;
     else if (receipt.outcome === "failed") failed++;
+    if (receipt.to === args.to && typeof receipt.recipientTitle === "string") {
+      target = senderLabel({
+        from: target,
+        senderTitle: receipt.recipientTitle,
+      });
+    }
   }
   const text = result.content.map((part) => part.text).join("\n");
   if (
