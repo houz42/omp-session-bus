@@ -93,18 +93,45 @@ test("await accepts the next peer message without replyTo; later messages inject
     );
     assert.equal(result.isError, undefined);
     assert.match(result.content[0].text, /answer/);
+    assert.ok(result.content[0].text.includes(peer.id));
+    assert.ok(result.content[0].text.includes('title: "peer"'));
+    assert.ok(
+      result.details &&
+        typeof result.details === "object" &&
+        "waited" in result.details,
+    );
+    const waited = result.details.waited;
+    assert.ok(
+      waited &&
+        typeof waited === "object" &&
+        "from" in waited &&
+        "senderTitle" in waited,
+    );
+    assert.equal(waited.from, peer.id);
+    assert.equal(waited.senderTitle, "peer");
     const view = outgoingView(
       { op: "send", to: peer.id, message: "question" },
       result,
     );
     assert.equal(view?.label, "Sent");
     assert.equal(view?.status, "success");
+    assert.equal(view?.target, `peer · ${peer.id}`);
     assert.ok(
       view?.waited && typeof view.waited === "object" && "body" in view.waited,
     );
     assert.equal(view.waited.body, "answer without quoting");
     assert.equal(f.injected.length, 1);
     assert.equal((f.injected[0].details as Envelope).body, "follow-up");
+    const details = f.injected[0].details;
+    assert.ok(
+      details &&
+        typeof details === "object" &&
+        "senderAddress" in details &&
+        "from" in details,
+    );
+    assert.equal(details.senderAddress, peer.id);
+    assert.equal(details.from, `peer · ${peer.id}`);
+    assert.ok(f.injected[0].content.includes(peer.id));
   } finally {
     await peer?.close();
     await f.close();
@@ -334,6 +361,17 @@ test("broadcast announcements do not consume an awaited direct reply", async () 
     assert.equal(f.injected.length, 1);
     assert.match(f.injected[0].content, /broadcast announcement/);
     assert.match(f.injected[0].content, /Announcement/);
+    const details = f.injected[0].details;
+    assert.ok(
+      details &&
+        typeof details === "object" &&
+        "senderTitle" in details &&
+        "senderAddress" in details &&
+        "from" in details,
+    );
+    assert.equal(details.senderTitle, "Peer");
+    assert.equal(details.senderAddress, peer.id);
+    assert.equal(details.from, `Peer · ${peer.id} [broadcast]`);
   } finally {
     await peer?.close();
     await f.close();

@@ -33,9 +33,9 @@ reply    {"type":"info","ok":true,"info":{...PeerInfo}}
 ```
 
 - A send resolves only after the receiving session's `receive` callback settled without error. There is no message log, no automatic reply, and no retry: **an unacknowledged send is ambiguous by design**.
-- Per-request budget is 5 seconds on both sides; requests are capped at ~100 KiB (`MAX_FRAME_BYTES`, derived from the 16 KiB body cap plus escaping headroom).
+- Per-request budget is 5 seconds on both sides; frames are capped at 124 KiB (`MAX_FRAME_BYTES`), allowing JSON escaping of the 16 KiB body and 4 KiB sender title plus envelope metadata.
 - Inbound concurrency is capped at 32 connections; excess connections receive an `overloaded` error.
-- Envelope validation is strict: only known fields (`id`, `from`, `to`, `body`, `replyTo`, `broadcast`, `ts`) survive parsing; unknown fields are dropped.
+- Envelope validation is strict: only known fields (`id`, `from`, `senderTitle`, `to`, `body`, `replyTo`, `broadcast`, `ts`) survive parsing; unknown fields are dropped. `senderTitle` is optional for older peers and captured from the sender's current session name before each send. It is a display label, never an authenticated identity or routing key.
 
 ### Discovery
 
@@ -77,6 +77,12 @@ There is **no manifest, index, or lock** — the directory listing is the catalo
 4. **Message injection.** Incoming envelopes are delivered as agent-attributed asides through omp's native IRC message cards (idle sessions wake). Pending `wait`/`await` waiters matching the sender resolve first — broadcast-marked envelopes are excluded, so a broadcast never satisfies a direct-message waiter. Board watch notifications use the same injection path and the same native rendering.
 5. **`/sessions` command.** Registry listing and manual send, surfaced both as a UI notification and an agent-visible message.
 6. **Presentation.** In TUI mode, `host-renderer.ts` uses host TUI primitives for outbound `Sent → recipient` cards and retains the native hub/wait renderer for received messages. `outgoing-view.ts` classifies actual receipts, board-post results, and partial failures without rewriting delivery data. Awaited replies remain separate incoming cards below the outgoing message. Newer hosts show ordinary session-bus results as tool output, never fictional incoming messages. The renderer loads lazily at session start; RPC/JSON modes work without it.
+
+Sender display labels contain a terminal-safe title followed by the full sender address.
+The native renderer clips overflowing headers to the available width; titles are bounded
+to 40 grapheme clusters for display. No clipped value is written back into the transport
+envelope or tool-result routing fields. Incoming custom-message details retain the complete
+reply address as `senderAddress`, while `from` is the native card's display label.
 
 Session identity: the transport address `session:<uuid>` is per-process and changes on restart; `PeerInfo.sessionId` carries the saved (persistent) omp session id for correlation across restarts.
 

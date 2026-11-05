@@ -4,6 +4,7 @@ import { SessionTransport, type Envelope, type PeerInfo } from "./transport.ts";
 import { BOARD_HELP, BOARD_TOPIC_HELP, executeBoard } from "./board.ts";
 import { BoardWatcher } from "./board-watch.ts";
 import { broadcast } from "./broadcast.ts";
+import { senderContext, senderLabel } from "./sender-display.ts";
 
 // Public extension API subset: no runtime SDK install or private IRC imports.
 type Params = Record<string, unknown>;
@@ -126,13 +127,14 @@ export default function sessionBus(pi: API): void {
     pi.sendMessage(
       {
         customType: "irc:incoming",
-        content: `Cross-session ${message.broadcast ? "broadcast announcement" : "agent message"} ${message.id} from ${message.from}${message.replyTo ? ` (reply to ${message.replyTo})` : ""}.\n\n${message.body}`,
+        content: `Cross-session ${message.broadcast ? "broadcast announcement" : "agent message"} ${message.id} from ${senderContext(message)}${message.replyTo ? ` (reply to ${message.replyTo})` : ""}.\n\n${message.body}`,
         display: true,
         attribution: "agent",
         // Native IRC cards render details.message; keep body for the transport envelope.
         details: {
           ...message,
-          from: `${message.from}${message.broadcast ? " [broadcast]" : ""}`,
+          senderAddress: message.from,
+          from: senderLabel(message),
           message: message.body,
         },
       },
@@ -260,6 +262,7 @@ export default function sessionBus(pi: API): void {
         to: message.to,
         outcome: "injected",
         messageId: message.id,
+        recipientTitle: message.recipientTitle,
       };
       if (!pending)
         return textResult(
@@ -269,7 +272,7 @@ export default function sessionBus(pi: API): void {
       const reply = await pending.promise;
       if (reply)
         return textResult(
-          `Message ${reply.id} from ${reply.from}:\n${reply.body}`,
+          `Message ${reply.id} from ${senderContext(reply)}:\n${reply.body}`,
           { op: "send", receipts: [receipt], waited: reply },
         );
       return textResult(
@@ -354,7 +357,7 @@ export default function sessionBus(pi: API): void {
         },
       },
     },
-    description: `${HELP}\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}\n${WATCH_HELP}`,
+    description: `${HELP}\nSender titles are display labels captured at send time, not identities. IRC headers may clip long labels/UUIDs; always reply using the full session:<uuid> address in message content or senderAddress metadata.\n\n# Public message board\n${BOARD_HELP}\n${BOARD_TOPIC_HELP}\n${WATCH_HELP}`,
     loadMode: "essential",
     strict: true,
     approval,
@@ -538,7 +541,7 @@ export default function sessionBus(pi: API): void {
           const message = await pending.promise;
           return textResult(
             message
-              ? `Message ${message.id} from ${message.from}:\n${message.body}`
+              ? `Message ${message.id} from ${senderContext(message)}:\n${message.body}`
               : signal?.aborted
                 ? "Cross-session wait cancelled"
                 : "Cross-session wait ended without a new message",

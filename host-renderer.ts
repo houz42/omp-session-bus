@@ -7,6 +7,7 @@ import {
   wrapTextWithAnsi,
 } from "@oh-my-pi/pi-tui/render";
 import { toolRenderers } from "@oh-my-pi/pi-tui/tools";
+import { senderLabel } from "./sender-display.ts";
 import { outgoingView, type BusRenderResult } from "./outgoing-view.ts";
 
 // Incoming messages retain the host's native IRC renderer on both host generations.
@@ -59,7 +60,7 @@ function card(
   );
 }
 
-export const sessionBusRenderer = {
+const baseRenderer = {
   mergeCallAndResult: true,
   renderCall(args: Record<string, unknown>, options: unknown, theme: unknown) {
     const outgoing = outgoingView(args);
@@ -125,5 +126,50 @@ export const sessionBusRenderer = {
       options,
       theme,
     );
+  },
+};
+
+export const sessionBusRenderer = {
+  ...baseRenderer,
+  renderResult(
+    result: {
+      content: Array<{ type: "text"; text: string }>;
+      details?: unknown;
+      isError?: boolean;
+    },
+    options: unknown,
+    theme: unknown,
+    args?: Record<string, unknown>,
+  ) {
+    const details = result.details;
+    if (details && typeof details === "object" && "waited" in details) {
+      const waited = details.waited;
+      if (
+        waited &&
+        typeof waited === "object" &&
+        "from" in waited &&
+        typeof waited.from === "string"
+      ) {
+        const label = senderLabel({
+          from: waited.from,
+          senderTitle:
+            "senderTitle" in waited && typeof waited.senderTitle === "string"
+              ? waited.senderTitle
+              : undefined,
+          broadcast: "broadcast" in waited && waited.broadcast === true,
+        });
+        // Render a copy only: result.details.waited.from remains the full routing key.
+        return baseRenderer.renderResult(
+          {
+            ...result,
+            details: { ...details, waited: { ...waited, from: label } },
+          },
+          options,
+          theme,
+          args,
+        );
+      }
+    }
+    return baseRenderer.renderResult(result, options, theme, args);
   },
 };

@@ -40,6 +40,8 @@ export interface PeerInfo {
 export interface Envelope {
   id: string;
   from: string;
+  /** Display label captured at send time; never a routing key. */
+  senderTitle?: string;
   to: string;
   body: string;
   replyTo?: string;
@@ -73,7 +75,7 @@ const UUID_PATTERN =
 const SESSION_ID_RE = new RegExp(`^${SESSION_PREFIX}${UUID_PATTERN}$`);
 const SESSION_FILE_RE = new RegExp(`^${UUID_PATTERN}\\.sock$`);
 // One NDJSON line: a fully escaped MAX_BODY_BYTES body (up to 6x) plus envelope fields.
-const MAX_FRAME_BYTES = MAX_BODY_BYTES * 6 + 4096;
+const MAX_FRAME_BYTES = MAX_BODY_BYTES * 6 + 4096 * 7;
 const OP_TIMEOUT_MS = 5000;
 const MAX_ID_BYTES = 256;
 const MAX_INFO_BYTES = 4096;
@@ -396,7 +398,7 @@ function parseEnvelope(raw: unknown, ownId: string): Envelope {
       "invalid_message",
       "the message must be a JSON object",
     );
-  const { id, from, to, body, replyTo, broadcast, ts } = raw;
+  const { id, from, to, body, replyTo, broadcast, senderTitle, ts } = raw;
   if (
     typeof id !== "string" ||
     id.length === 0 ||
@@ -448,6 +450,11 @@ function parseEnvelope(raw: unknown, ownId: string): Envelope {
   }
   if (broadcast !== undefined && typeof broadcast !== "boolean")
     throw new FrameError("invalid_message", "broadcast must be a boolean");
+  if (senderTitle !== undefined && !isBoundedString(senderTitle))
+    throw new FrameError(
+      "invalid_message",
+      `senderTitle must be a string of at most ${MAX_INFO_BYTES} UTF-8 bytes`,
+    );
   if (typeof ts !== "number" || !Number.isFinite(ts)) {
     throw new FrameError(
       "invalid_message",
@@ -462,6 +469,7 @@ function parseEnvelope(raw: unknown, ownId: string): Envelope {
     ts,
     ...(replyTo === undefined ? {} : { replyTo }),
     ...(broadcast === undefined ? {} : { broadcast }),
+    ...(senderTitle === undefined ? {} : { senderTitle }),
   };
 }
 
@@ -660,7 +668,7 @@ export class SessionTransport {
     to: string,
     body: string,
     options?: SendOptions,
-  ): Promise<Envelope> {
+  ): Promise<Envelope & { recipientTitle?: string }> {
     if (this.#closed) throw new Error("the session bus endpoint is closed");
     if (
       options !== undefined &&
@@ -708,9 +716,14 @@ export class SessionTransport {
       );
     }
     if (signal?.aborted) throw abortError("send cancelled before delivery");
+    const senderTitle = validateSelfInfo(
+      this.#info(),
+      "the info callback",
+    ).name;
     const envelope: Envelope = {
       id,
       from: this.id,
+      senderTitle,
       to,
       body,
       ts: Date.now(),
@@ -744,7 +757,9 @@ export class SessionTransport {
       typeof reply.id === "string" &&
       reply.id === id
     ) {
-      return envelope;
+      return isBoundedString(reply.recipientTitle)
+        ? { ...envelope, recipientTitle: reply.recipientTitle }
+        : envelope;
     }
     if (
       isRecord(reply) &&
@@ -924,7 +939,15 @@ export class SessionTransport {
               `the receive callback did not settle within ${remaining} ms`,
             ),
         );
-        respond({ type: "ack", ok: true, id: envelope.id });
+        // Optional presentation metadata must never turn accepted delivery into failure.
+        let recipientTitle: string | undefined;
+        try {
+          const name = this.#info().name;
+          if (isBoundedString(name)) recipientTitle = name;
+        } catch {
+          // Keep the ACK valid even if the display-name callback fails.
+        }
+        respond({ type: "ack", ok: true, id: envelope.id, recipientTitle });
         return;
       }
       respond(
