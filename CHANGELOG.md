@@ -2,6 +2,12 @@
 
 Notable behavior changes in omp-session-bus. Dates are not tracked here; versions map to the repository history.
 
+## Unreleased
+
+- Outgoing messages now show `Sending → recipient`, then `Sent → recipient` with the message body instead of a receipt disguised as incoming IRC traffic. Received messages keep the native `IRC ← sender` card; an awaited reply appears below the separate sent card.
+- Board posts show `Published → board:topic`. Broadcasts show accepted/failed counts, with warning styling for partial delivery and `Not sent` for an empty recipient set. Failed or unconfirmed sends show `Send failed`, never a success label.
+- On newer hosts, ordinary session-bus results no longer impersonate messages from a fictional “Session bus” sender. Bodies remain collapsed by default and expand with the host's tool-expansion control; delivery and visibility settings are unchanged.
+
 ## 0.5.0
 
 `session:all` broadcast announcements: one message fanned out to every live same-user endpoint except the sender.

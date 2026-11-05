@@ -11,7 +11,7 @@ The plugin owns the `session_bus` tool on every supported host. Registration hap
 
 ## In action
 
-A scripted demo between two sessions, `alpha` and `beta`. The sender delivers a DM with `session_bus send`; the bus returns the native result card with the receiver's acceptance and message id:
+Outgoing messages show `Sent → recipient` with your message body; received messages show the native `IRC ← sender` card. Ctrl+O expands the body when tool activity is visible. Failed sends, board publications, and broadcasts have distinct status headers. The older screenshot below shows the previous acceptance-receipt presentation:
 
 ![Sender session_bus send with acceptance card](docs/assets/demo-sender.png)
 

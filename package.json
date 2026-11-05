@@ -39,6 +39,7 @@
     "board-store.ts",
     "board-watch.ts",
     "host-renderer.ts",
+    "outgoing-view.ts",
     "host-tui.d.ts",
     "tsconfig.json"
   ]

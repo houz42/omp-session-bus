@@ -8,7 +8,7 @@ declare module "@oh-my-pi/pi-tui/tools" {
         args: Record<string, unknown>,
         options: unknown,
         theme: unknown,
-      ): unknown;
+      ): import("@oh-my-pi/pi-tui").Component;
       renderResult(
         result: {
           content: Array<{ type: "text"; text: string }>;
@@ -18,7 +18,36 @@ declare module "@oh-my-pi/pi-tui/tools" {
         options: unknown,
         theme: unknown,
         args?: Record<string, unknown>,
-      ): unknown;
+      ): import("@oh-my-pi/pi-tui").Component;
     }
   >;
+}
+
+declare module "@oh-my-pi/pi-tui" {
+  export interface Component {
+    render(width: number): readonly string[];
+    invalidate(): void;
+  }
+  export interface Theme {
+    fg(color: string, text: string): string;
+  }
+  export class Container implements Component {
+    addChild(child: Component): void;
+    render(width: number): readonly string[];
+    invalidate(): void;
+  }
+}
+
+declare module "@oh-my-pi/pi-tui/render" {
+  export function createCachedComponent(
+    getExpanded: () => boolean,
+    compute: (width: number, expanded: boolean) => string[],
+  ): import("@oh-my-pi/pi-tui").Component;
+  export function renderStatusLine(
+    options: { icon: string; title: string; meta?: string[] },
+    theme: unknown,
+  ): string;
+  export function replaceTabs(text: string): string;
+  export function truncateToWidth(text: string, width: number): string;
+  export function wrapTextWithAnsi(text: string, width: number): string[];
 }

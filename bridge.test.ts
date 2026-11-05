@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import extension from "./index.ts";
 import { SessionTransport, type Envelope } from "./transport.ts";
+import { outgoingView } from "./outgoing-view.ts";
 
 type API = Parameters<typeof extension>[0];
 type Context = Parameters<Parameters<API["on"]>[1]>[1];
@@ -92,6 +93,16 @@ test("await accepts the next peer message without replyTo; later messages inject
     );
     assert.equal(result.isError, undefined);
     assert.match(result.content[0].text, /answer/);
+    const view = outgoingView(
+      { op: "send", to: peer.id, message: "question" },
+      result,
+    );
+    assert.equal(view?.label, "Sent");
+    assert.equal(view?.status, "success");
+    assert.ok(
+      view?.waited && typeof view.waited === "object" && "body" in view.waited,
+    );
+    assert.equal(view.waited.body, "answer without quoting");
     assert.equal(f.injected.length, 1);
     assert.equal((f.injected[0].details as Envelope).body, "follow-up");
   } finally {
@@ -363,6 +374,10 @@ test("broadcast preview is read-only and actual sends retain write approval", as
     );
     assert.equal(preview.isError, undefined);
     assert.equal(incoming.length, 0);
+    assert.equal(
+      outgoingView({ op: "send", to: "session:all", preview: true }, preview),
+      undefined,
+    );
     const rejected = await f.tool.execute(
       "await",
       { op: "send", to: "session:all", message: "Notice", await: true },
@@ -385,6 +400,55 @@ test("broadcast preview is read-only and actual sends retain write approval", as
     assert.match(incoming[0].body, /Broadcast announcement/);
   } finally {
     await peer.close();
+    await f.close();
+  }
+});
+
+test("outbound presentation distinguishes partial delivery, failure, and no recipients", async () => {
+  const f = await fixture();
+  const info = () => ({
+    sessionId: "peer",
+    name: "Peer",
+    cwd: f.directory,
+    pid: process.pid,
+    state: "idle" as const,
+  });
+  const good = await SessionTransport.start({
+    directory: f.directory,
+    info,
+    receive: () => {},
+  });
+  const bad = await SessionTransport.start({
+    directory: f.directory,
+    info,
+    receive: () => {
+      throw new Error("Rejected by peer");
+    },
+  });
+  const send = (params: Record<string, unknown>) =>
+    f.tool.execute("presentation", params, undefined, undefined, f.context);
+  try {
+    const args = { op: "send", to: "session:all", message: "Announcement" };
+    const mixed = outgoingView(args, await send(args));
+    assert.equal(mixed?.label, "Broadcast");
+    assert.equal(mixed?.status, "warning");
+    assert.equal(mixed?.summary, "1 accepted · 1 failed/not attempted");
+    assert.match(mixed?.error ?? "", /failed/);
+    const direct = { op: "send", to: bad.id, message: "Rejected message" };
+    const rejected = outgoingView(direct, await send(direct));
+    assert.equal(rejected?.label, "Send failed");
+    assert.equal(rejected?.status, "error");
+    assert.equal(rejected?.body, direct.message);
+    assert.match(rejected?.error ?? "", /Rejected by peer/);
+    await good.close();
+    await bad.close();
+    const empty = outgoingView(args, await send(args));
+    assert.equal(empty?.label, "Not sent");
+    assert.equal(empty?.status, "warning");
+    assert.equal(empty?.summary, "no recipients");
+  } finally {
+    await good.close();
+    await bad.close();
     await f.close();
   }
 });

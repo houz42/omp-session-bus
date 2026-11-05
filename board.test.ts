@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { executeBoard } from "./board.ts";
+import { outgoingView } from "./outgoing-view.ts";
 
 test("board addresses publish without recipients and reads never consume posts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "board-address-"));
@@ -20,10 +21,12 @@ test("board addresses publish without recipients and reads never consume posts",
         author,
       ),
     );
-    await executeBoard(
-      { op: "send", to: "board:general", message: "Useful finding" },
-      author,
-    );
+    const args = { op: "send", to: "board:general", message: "Useful finding" };
+    const published = await executeBoard(args, author);
+    const view = outgoingView(args, published);
+    assert.equal(view?.label, "Published");
+    assert.equal(view?.status, "success");
+    assert.equal(view?.target, "board:general");
     const first = await executeBoard(
       { op: "list", from: "board:general" },
       author,
