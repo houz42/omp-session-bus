@@ -7,6 +7,9 @@ Notable behavior changes in omp-session-bus. Dates are not tracked here; version
 - Cross-session direct messages, broadcasts, and awaited replies include the sender's title captured at send time. Titles are display labels, never routing keys or authenticated identities.
 - Native IRC headers show the title before the sender address and retain the host's width-aware ellipsis. Long titles are bounded to leave room for the UUID; terminal control sequences are removed from display labels.
 - Full sender addresses and titles remain in envelopes/model context. Incoming cards expose the full reply address separately as `senderAddress`; UI clipping never changes routing. Peers without title metadata fall back to the address.
+- Outgoing messages now show `Sending → recipient`, then `Sent → recipient` with the message body instead of a receipt disguised as incoming IRC traffic. Received messages keep the native `IRC ← sender` card; an awaited reply appears below the separate sent card.
+- Board posts show `Published → board:topic`. Broadcasts show accepted/failed counts, with warning styling for partial delivery and `Not sent` for an empty recipient set. Failed or unconfirmed sends show `Send failed`, never a success label.
+- On newer hosts, ordinary session-bus results no longer impersonate messages from a fictional “Session bus” sender. Bodies remain collapsed by default and expand with the host's tool-expansion control; delivery and visibility settings are unchanged.
 
 ## 0.5.0
 

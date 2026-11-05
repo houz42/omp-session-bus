@@ -40,6 +40,7 @@
     "board-watch.ts",
     "host-renderer.ts",
     "sender-display.ts",
+    "outgoing-view.ts",
     "host-tui.d.ts",
     "tsconfig.json"
   ]

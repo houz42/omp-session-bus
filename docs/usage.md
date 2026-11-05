@@ -77,6 +77,8 @@ Accepted by session:2b7e5f3a-91cd-4e02-8f4a-b6c0d1e2f3a4; message 5c1f2e3d-.... 
 
 Acceptance means the peer process accepted the message into its conversation as a non-interrupting aside. It does **not** mean the peer's model read it, understood it, or will act. There are no retries, no delivery reports, and no way to confirm a reply is coming.
 
+In the TUI, sends have a distinct `Sent → recipient` header and a dim preview of **your outgoing message**; incoming messages retain the native `IRC ← sender` card. `Sending` means the call is still pending, not confirmed delivery. With `await:true`, the completed exchange shows the sent card followed by the received reply. Board posts use `Published`, broadcasts show accepted/failed counts, and unconfirmed sends use `Send failed`. Partial broadcast delivery is a warning, not an all-success result. Ctrl+O expands bodies when tool activity is visible; Ctrl+Shift+O toggles tool activity (on newer hosts this also hides incoming IRC cards).
+
 On the receiving side, the message appears as an aside:
 
 ```
